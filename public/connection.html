@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connection - CAPITALIZE</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <a href="../index.html" class="btn btn-secondary back-btn">← Back</a>
+            <h1 id="connection-title">Connection</h1>
+            <p class="sub" id="connection-code-display"></p>
+        </header>
+
+        <main>
+            <section class="card">
+                <h2>Collaboration</h2>
+                <div class="collab-layout">
+                    <div>
+                        <h3>Shared Notes</h3>
+                        <textarea id="shared-notes" placeholder="Shared notes..."></textarea>
+                        <button onclick="saveNotes()" class="btn btn-secondary btn-small">Save Notes</button>
+                    </div>
+                    <div>
+                        <h3>Chat</h3>
+                        <div id="chat-log" class="chat-log"></div>
+                        <div class="chat-input-row">
+                            <input id="chat-input" placeholder="Type message..." />
+                            <button onclick="sendMessage()" class="btn btn-primary">Send</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>Participants</h2>
+                <div id="participants-display" class="participants"></div>
+            </section>
+
+            <section class="card">
+                <h2>Payment Processing</h2>
+                <div class="payment-section">
+                    <div class="form-grid">
+                        <label>
+                            Payment Amount ($)
+                            <input id="payment-amount" type="number" step="0.01" placeholder="100.00" />
+                        </label>
+                        <label>
+                            Description
+                            <input id="payment-description" placeholder="Service fee, commission, etc." />
+                        </label>
+                    </div>
+                    <button onclick="initiatePayment()" class="btn btn-primary">Generate Payment Link</button>
+                    <div id="payment-result" class="result"></div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        const connectionId = window.location.pathname.split('/').pop();
+        const socket = io();
+        let currentConnection = null;
+        let currentUser = null;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', async () => {
+            await loadConnection();
+            setupSocketListeners();
+            setupUserInfo();
+        });
+
+        async function loadConnection() {
+            try {
+                const response = await fetch(`/api/connections/${connectionId}`);
+                const result = await response.json();
+                
+                if (result.success) {
+                    currentConnection = result.connection;
+                    updateUI();
+                } else {
+                    document.body.innerHTML = `
+                        <div class="container">
+                            <div class="card">
+                                <h2>Connection Not Found</h2>
+                                <p>The connection code "${connectionId}" was not found.</p>
+                                <a href="/" class="btn btn-primary">Go Home</a>
+                            </div>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('Error loading connection:', error);
+            }
+        }
+
+        function updateUI() {
+            document.getElementById('connection-title').textContent = currentConnection.title;
+            document.getElementById('connection-code-display').textContent = `Code: ${connectionId}`;
+            document.getElementById('shared-notes').value = currentConnection.notes || '';
+            
+            updateParticipants();
+            updateChat();
+        }
+
+        function updateParticipants() {
+            const container = document.getElementById('participants-display');
+            container.innerHTML = '';
+            
+            ['referrer', 'vendor', 'host'].forEach(role => {
+                const participant = currentConnection[role];
+                const div = document.createElement('div');
+                div.className = 'participant';
+                div.innerHTML = `
+                    <h4>${role.charAt(0).toUpperCase() + role.slice(1)}</h4>
+                    <p><strong>Name:</strong> ${participant.name || 'Not joined'}</p>
+                    <p><strong>Email:</strong> ${participant.email || 'Not provided'}</p>
+                    <p><strong>PayPal:</strong> ${participant.payPal || 'Not provided'}</p>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function updateChat() {
+            const chatLog = document.getElementById('chat-log');
+            chatLog.innerHTML = '';
+            (currentConnection.messages || []).forEach(msg => {
+                addMessageToChat(msg);
+            });
+            chatLog.scrollTop = chatLog.scrollHeight;
+        }
+
+        function addMessageToChat(msg) {
+            const chatLog = document.getElementById('chat-log');
+            const div = document.createElement('div');
+            div.className = 'message';
+            div.innerHTML = `
+                <strong>[${msg.role}] ${msg.name}:</strong> 
+                ${msg.text} 
+                <span class="timestamp">${new Date(msg.timestamp).toLocaleTimeString()}</span>
+            `;
+            chatLog.appendChild(div);
+            chatLog.scrollTop = chatLog.scrollHeight;
+        }
+
+        function setupSocketListeners() {
+            socket.emit('join-connection', connectionId);
+            
+            socket.on('new-message', (message) => {
+                addMessageToChat(message);
+            });
+        }
+
+        function setupUserInfo() {
+            // Simple user identification for demo
+            const name = prompt('Enter your name:') || 'Anonymous';
+            const role = prompt('Enter your role (referrer/vendor/host):') || 'guest';
+            currentUser = { name, role };
+        }
+
+        function sendMessage() {
+            const input = document.getElementById('chat-input');
+            const text = input.value.trim();
+            if (!text || !currentUser) return;
+
+            const message = {
+                text,
+                name: currentUser.name,
+                role: currentUser.role
+            };
+
+            socket.emit('send-message', { connectionId, message });
+            input.value = '';
+        }
+
+        async function saveNotes() {
+            const notes = document.getElementById('shared-notes').value;
+            
+            try {
+                const response = await fetch(`/api/connections/${connectionId}/notes`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ notes })
+                });
+                
+                if (response.ok) {
+                    // Visual feedback
+                    const btn = event.target;
+                    const originalText = btn.textContent;
+                    btn.textContent = 'Saved!';
+                    btn.style.background = '#22c55e';
+                    setTimeout(() => {
+                        btn.textContent = originalText;
+                        btn.style.background = '';
+                    }, 1500);
+                }
+            } catch (error) {
+                console.error('Error saving notes:', error);
+            }
+        }
+
+        async function initiatePayment() {
+            const amount = document.getElementById('payment-amount').value;
+            const description = document.getElementById('payment-description').value;
+            
+            if (!amount) {
+                alert('Please enter a payment amount');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/payments/initiate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ connectionId, amount, description })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    document.getElementById('payment-result').innerHTML = `
+                        <div class="success">
+                            <h4>Payment Link Generated! 💳</h4>
+                            <p><strong>Amount:</strong> $${result.payment.amount}</p>
+                            <p><strong>Payment URL:</strong> <a href="${result.payment.paymentUrl}" target="_blank" class="link">${result.payment.paymentUrl}</a></p>
+                            <p><em>Note: This is a placeholder. In production, this would integrate with Stripe/PayPal for automatic processing and fee collection.</em></p>
+                        </div>
+                    `;
+                } else {
+                    document.getElementById('payment-result').innerHTML = `
+                        <div class="error">Error generating payment link</div>
+                    `;
+                }
+            } catch (error) {
+                document.getElementById('payment-result').innerHTML = `
+                    <div class="error">Error processing payment request</div>
+                `;
+            }
+        }
+
+        // Handle Enter key in chat
+        document.getElementById('chat-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+    </script>
+</body>
+</html>
