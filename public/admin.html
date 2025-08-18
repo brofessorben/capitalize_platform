@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - CAPITALIZE</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <a href="../index.html" class="btn btn-secondary back-btn">← Back</a>
+            <h1>Admin Dashboard</h1>
+            <p class="sub">Monitor connections and payments</p>
+        </header>
+
+        <main>
+            <section class="card">
+                <h2>Statistics</h2>
+                <div class="stats-grid" id="stats-display">
+                    <div class="stat-card">
+                        <h3 id="total-connections">-</h3>
+                        <p>Total Connections</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3 id="active-connections">-</h3>
+                        <p>Active Connections</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3 id="total-payments">-</h3>
+                        <p>Total Payments</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3 id="total-revenue">$-</h3>
+                        <p>Total Revenue</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>All Connections</h2>
+                <div id="connections-list" class="connections-list"></div>
+            </section>
+
+            <section class="card">
+                <h2>Payment Settings</h2>
+                <p class="muted">Configure automatic payment processing and fee collection.</p>
+                <div class="payment-config">
+                    <label>
+                        Platform Fee (%)
+                        <input type="number" value="5" min="0" max="50" step="0.1" />
+                    </label>
+                    <label>
+                        PayPal Business Email
+                        <input type="email" placeholder="business@yourcompany.com" />
+                    </label>
+                    <label>
+                        Stripe Secret Key
+                        <input type="password" placeholder="sk_live_..." />
+                    </label>
+                    <button class="btn btn-primary">Save Settings</button>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            await loadStats();
+            await loadConnections();
+        });
+
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/admin/stats');
+                const stats = await response.json();
+                
+                document.getElementById('total-connections').textContent = stats.totalConnections;
+                document.getElementById('active-connections').textContent = stats.activeConnections;
+                document.getElementById('total-payments').textContent = stats.totalPayments;
+                document.getElementById('total-revenue').textContent = `$${stats.totalRevenue.toFixed(2)}`;
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+
+        async function loadConnections() {
+            try {
+                const response = await fetch('/api/admin/connections');
+                const connections = await response.json();
+                
+                const container = document.getElementById('connections-list');
+                container.innerHTML = '';
+                
+                connections.forEach(connection => {
+                    const div = document.createElement('div');
+                    div.className = 'connection-item';
+                    div.innerHTML = `
+                        <div class="connection-header">
+                            <h4>${connection.title}</h4>
+                            <span class="connection-code">${connection.id}</span>
+                        </div>
+                        <div class="connection-details">
+                            <p><strong>Referrer:</strong> ${connection.referrer.name} (${connection.referrer.email})</p>
+                            <p><strong>Vendor:</strong> ${connection.vendor.name || 'Not joined'}</p>
+                            <p><strong>Host:</strong> ${connection.host.name || 'Not joined'}</p>
+                            <p><strong>Created:</strong> ${new Date(connection.createdAt).toLocaleDateString()}</p>
+                            <p><strong>Messages:</strong> ${connection.messages.length}</p>
+                        </div>
+                        <div class="connection-actions">
+                            <a href="/connection/${connection.id}" class="btn btn-secondary btn-small">View</a>
+                        </div>
+                    `;
+                    container.appendChild(div);
+                });
+                
+                if (connections.length === 0) {
+                    container.innerHTML = '<p class="muted">No connections yet.</p>';
+                }
+            } catch (error) {
+                console.error('Error loading connections:', error);
+            }
+        }
+    </script>
+</body>
+</html>
