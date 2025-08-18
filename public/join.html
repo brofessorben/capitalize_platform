@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Join Connection - CAPITALIZE</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <a href="../index.html" class="btn btn-secondary back-btn">← Back</a>
+            <h1>Join Connection</h1>
+            <p class="sub">Join an existing connection as vendor or host</p>
+        </header>
+
+        <main>
+            <section class="card">
+                <h2>Connection Code</h2>
+                <div class="form-group">
+                    <label>
+                        Enter Connection Code
+                        <input id="connection-code" placeholder="e.g. 9f2ac3b1" />
+                    </label>
+                    <button onclick="lookupConnection()" class="btn btn-secondary">Look Up Connection</button>
+                </div>
+                <div id="lookup-result" class="result"></div>
+            </section>
+
+            <section class="card hidden" id="join-form-section">
+                <h2>Your Details</h2>
+                <form id="join-form">
+                    <div class="form-grid">
+                        <label>
+                            Your Role *
+                            <select id="role" name="role" required>
+                                <option value="">Select Role</option>
+                                <option value="vendor">Vendor</option>
+                                <option value="host">Host</option>
+                            </select>
+                        </label>
+                        
+                        <label>
+                            Your Name *
+                            <input id="participant-name" name="name" placeholder="Your business/name" required />
+                        </label>
+                        
+                        <label>
+                            Your Email *
+                            <input id="participant-email" name="email" type="email" placeholder="your@email.com" required />
+                        </label>
+                        
+                        <label>
+                            Your PayPal
+                            <input id="participant-paypal" name="paypal" placeholder="paypal.me/yourname or email" />
+                        </label>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary">Join Connection</button>
+                </form>
+                <div id="join-result" class="result"></div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        let currentConnectionId = null;
+
+        async function lookupConnection() {
+            const code = document.getElementById('connection-code').value.trim();
+            if (!code) return;
+
+            try {
+                const response = await fetch(`/api/connections/${code}`);
+                const result = await response.json();
+
+                if (result.success) {
+                    currentConnectionId = code;
+                    document.getElementById('lookup-result').innerHTML = `
+                        <div class="success">
+                            <h4>Connection Found: ${result.connection.title}</h4>
+                            <p>Created by: ${result.connection.referrer.name}</p>
+                            <p>Fill in your details below to join.</p>
+                        </div>
+                    `;
+                    document.getElementById('join-form-section').classList.remove('hidden');
+                } else {
+                    document.getElementById('lookup-result').innerHTML = `
+                        <div class="error">Connection not found. Check your code.</div>
+                    `;
+                    document.getElementById('join-form-section').classList.add('hidden');
+                }
+            } catch (error) {
+                document.getElementById('lookup-result').innerHTML = `
+                    <div class="error">Error looking up connection. Please try again.</div>
+                `;
+            }
+        }
+
+        document.getElementById('join-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            if (!currentConnectionId) return;
+            
+            const formData = new FormData(e.target);
+            const role = formData.get('role');
+            const participant = {
+                name: formData.get('name'),
+                email: formData.get('email'),
+                payPal: formData.get('paypal')
+            };
+            
+            try {
+                const response = await fetch(`/api/connections/${currentConnectionId}/join`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ role, participant })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    document.getElementById('join-result').innerHTML = `
+                        <div class="success">
+                            <h4>Successfully Joined! 🎉</h4>
+                            <p>You're now part of this connection as ${role}.</p>
+                            <a href="/connection/${currentConnectionId}" class="btn btn-primary">Go to Connection</a>
+                        </div>
+                    `;
+                    e.target.reset();
+                } else {
+                    document.getElementById('join-result').innerHTML = `
+                        <div class="error">Error: ${result.message}</div>
+                    `;
+                }
+            } catch (error) {
+                document.getElementById('join-result').innerHTML = `
+                    <div class="error">Error joining connection. Please try again.</div>
+                `;
+            }
+        });
+
+        // Handle Enter key in connection code input
+        document.getElementById('connection-code').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                lookupConnection();
+            }
+        });
+    </script>
+</body>
+</html>
