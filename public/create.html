@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Connection - CAPITALIZE</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <a href="../index.html" class="btn btn-secondary back-btn">← Back</a>
+            <h1>Create Connection</h1>
+            <p class="sub">Set up a new connection as a referrer</p>
+        </header>
+
+        <main>
+            <section class="card">
+                <h2>Connection Details</h2>
+                <form id="create-form">
+                    <div class="form-grid">
+                        <label>
+                            Connection Title *
+                            <input id="title" name="title" placeholder="Anna / Roadhouse / Wedding" required />
+                        </label>
+                        
+                        <label>
+                            Your Name (Referrer) *
+                            <input id="name" name="name" placeholder="Ben" required />
+                        </label>
+                        
+                        <label>
+                            Your Email *
+                            <input id="email" name="email" type="email" placeholder="you@example.com" required />
+                        </label>
+                        
+                        <label>
+                            Your PayPal
+                            <input id="paypal" name="paypal" placeholder="paypal.me/yourname or email" />
+                        </label>
+                    </div>
+                    
+                    <label>
+                        Initial Notes
+                        <textarea id="notes" name="notes" placeholder="Any context for vendor + host..."></textarea>
+                    </label>
+                    
+                    <button type="submit" class="btn btn-primary">Create Connection</button>
+                </form>
+                
+                <div id="result" class="result"></div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        document.getElementById('create-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = new FormData(e.target);
+            const data = {
+                title: formData.get('title'),
+                referrer: {
+                    name: formData.get('name'),
+                    email: formData.get('email'),
+                    payPal: formData.get('paypal')
+                },
+                notes: formData.get('notes')
+            };
+            
+            try {
+                const response = await fetch('/api/connections', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    document.getElementById('result').innerHTML = `
+                        <div class="success">
+                            <h4>Connection Created! 🎉</h4>
+                            <p><strong>Connection Code:</strong> <code>${result.connection.id}</code></p>
+                            <p>Share this code with your vendor and host.</p>
+                            <a href="/connection/${result.connection.id}" class="btn btn-primary">Go to Connection</a>
+                        </div>
+                    `;
+                    e.target.reset();
+                } else {
+                    document.getElementById('result').innerHTML = `
+                        <div class="error">Error: ${result.message}</div>
+                    `;
+                }
+            } catch (error) {
+                document.getElementById('result').innerHTML = `
+                    <div class="error">Error creating connection. Please try again.</div>
+                `;
+            }
+        });
+    </script>
+</body>
+</html>
