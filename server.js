@@ -26,7 +26,7 @@ const connections = new Map();
 const payments = new Map();
 
 // Email configuration (replace with your SMTP settings)
-const transporter = nodemailer.createTransporter({
+const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
     user: process.env.EMAIL_USER || 'your-email@gmail.com',
