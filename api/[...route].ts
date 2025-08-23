@@ -4,18 +4,43 @@ import cors from "cors";
 import serverless from "serverless-http";
 import { z } from "zod";
 import { nanoid } from "nanoid";
-
-/**
- * CAPITALIZE – minimal Express app for Vercel serverless.
- * Features: security headers, CORS, JSON parsing, Zod validation, centralized errors,
- * and a tiny in-memory store (swap to real DB later).
- */
+import rateLimit from "express-rate-limit";
+import { v4 as uuidv4 } from "uuid";
 
 const app = express();
 
+/** ---------- Middlewares ---------- */
 app.use(helmet());
-app.use(cors());
+
+// 🔒 CORS allowlist (replace with your domains later)
+const allowedOrigins = ["https://yourdomain.com", "http://localhost:3000"];
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+  })
+);
+
 app.use(express.json());
+
+// ⚡ Rate limiting (100 requests per 15 minutes per IP)
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+});
+app.use(limiter);
+
+// 🪪 Request IDs for logging/tracing
+app.use((req, _res, next) => {
+  (req as any).id = uuidv4();
+  console.log(`[${(req as any).id}] ${req.method} ${req.url}`);
+  next();
+});
 
 /** ---------- Utils: errors & async wrapper ---------- */
 class AppError extends Error {
@@ -40,7 +65,7 @@ function validate<T extends z.ZodTypeAny>(schema: T, source: "body" | "query" | 
       err.details = details;
       return next(err);
     }
-    (req as any)[source] = parsed.data; // use parsed data downstream
+    (req as any)[source] = parsed.data;
     next();
   };
 }
@@ -113,13 +138,17 @@ app.get(
 );
 
 /** ---------- Error middleware (last) ---------- */
-app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   const isValidation = err?.message === "ValidationError";
   const status = isValidation ? 400 : err?.status ?? 500;
-  const payload: any = { ok: false, error: err?.message ?? "Internal Server Error" };
+  const payload: any = {
+    ok: false,
+    error: err?.message ?? "Internal Server Error",
+    requestId: (req as any).id,
+  };
   if (isValidation && err.details) payload.details = err.details;
   res.status(status).json(payload);
 });
 
-/** ---------- Export as Vercel serverless function ---------- */
+/** ---------- Export ---------- */
 export default serverless(app);
