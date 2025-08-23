@@ -6,43 +6,34 @@ import { z } from "zod";
 import { nanoid } from "nanoid";
 import rateLimit from "express-rate-limit";
 import { v4 as uuidv4 } from "uuid";
+import { supabase } from "./_supabase";
 
 const app = express();
 
 /** ---------- Middlewares ---------- */
 app.use(helmet());
 
-// 🔒 CORS allowlist (replace with your domains later)
+// 🔒 CORS allowlist (change later to your real domains)
 const allowedOrigins = ["https://yourdomain.com", "http://localhost:3000"];
 app.use(
   cors({
-    origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS"));
-      }
-    },
+    origin: (origin, cb) => (!origin || allowedOrigins.includes(origin) ? cb(null, true) : cb(new Error("Not allowed by CORS"))),
   })
 );
 
 app.use(express.json());
 
-// ⚡ Rate limiting (100 requests per 15 minutes per IP)
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-});
-app.use(limiter);
+// ⚡ Rate limiting
+app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
 
-// 🪪 Request IDs for logging/tracing
+// 🪪 Request IDs
 app.use((req, _res, next) => {
   (req as any).id = uuidv4();
   console.log(`[${(req as any).id}] ${req.method} ${req.url}`);
   next();
 });
 
-/** ---------- Utils: errors & async wrapper ---------- */
+/** ---------- Utils ---------- */
 class AppError extends Error {
   status: number;
   constructor(message: string, status = 400) {
@@ -50,7 +41,6 @@ class AppError extends Error {
     this.status = status;
   }
 }
-
 const asyncHandler =
   <T extends express.RequestHandler>(fn: T): express.RequestHandler =>
   (req, res, next) =>
@@ -70,26 +60,16 @@ function validate<T extends z.ZodTypeAny>(schema: T, source: "body" | "query" | 
   };
 }
 
-/** ---------- In-memory mock store ---------- */
-type Referral = {
-  id: string;
-  hostEmail: string;
-  vendorId: string;
-  note?: string;
-  status: "PENDING" | "APPROVED" | "REJECTED";
-  createdAt: string;
-};
-const REFERRALS = new Map<string, Referral>();
-
 /** ---------- Schemas ---------- */
 const CreateReferralSchema = z.object({
   hostEmail: z.string().email(),
   vendorId: z.string().min(1),
   note: z.string().max(500).optional(),
 });
-
-const IdParamSchema = z.object({
-  id: z.string().min(1),
+const IdParamSchema = z.object({ id: z.string().min(1) });
+const ListQuerySchema = z.object({
+  limit: z.coerce.number().min(1).max(100).default(50),
+  cursor: z.string().optional(), // use created_at ISO as cursor (or id)
 });
 
 /** ---------- Routes ---------- */
@@ -97,23 +77,33 @@ const IdParamSchema = z.object({
 // Health check
 app.get("/healthz", (_req, res) => res.json({ ok: true }));
 
-// Create referral
+// Create referral (DB)
 app.post(
   "/referrals",
   validate(CreateReferralSchema, "body"),
   asyncHandler(async (req, res) => {
     const { hostEmail, vendorId, note } = req.body as z.infer<typeof CreateReferralSchema>;
     const id = nanoid();
-    const record: Referral = {
-      id,
-      hostEmail,
-      vendorId,
-      note,
-      status: "PENDING",
-      createdAt: new Date().toISOString(),
-    };
-    REFERRALS.set(id, record);
-    res.status(201).json({ ok: true, referral: record });
+
+    const { data, error } = await supabase
+      .from("referrals")
+      .insert([{ id, host_email: hostEmail, vendor_id: vendorId, note, status: "PENDING" }])
+      .select()
+      .single();
+
+    if (error) throw new AppError(error.message, 500);
+
+    res.status(201).json({
+      ok: true,
+      referral: {
+        id: data.id,
+        hostEmail: data.host_email,
+        vendorId: data.vendor_id,
+        note: data.note ?? undefined,
+        status: data.status,
+        createdAt: data.created_at,
+      },
+    });
   })
 );
 
@@ -123,21 +113,59 @@ app.get(
   validate(IdParamSchema, "params"),
   asyncHandler(async (req, res) => {
     const { id } = req.params as z.infer<typeof IdParamSchema>;
-    const found = REFERRALS.get(id);
-    if (!found) throw new AppError("Referral not found", 404);
-    res.json({ ok: true, referral: found });
+
+    const { data, error } = await supabase.from("referrals").select("*").eq("id", id).single();
+    if (error?.code === "PGRST116") throw new AppError("Referral not found", 404); // no rows
+    if (error) throw new AppError(error.message, 500);
+
+    res.json({
+      ok: true,
+      referral: {
+        id: data.id,
+        hostEmail: data.host_email,
+        vendorId: data.vendor_id,
+        note: data.note ?? undefined,
+        status: data.status,
+        createdAt: data.created_at,
+      },
+    });
   })
 );
 
-// List all
+// List (cursor + limit)
 app.get(
   "/referrals",
-  asyncHandler(async (_req, res) => {
-    res.json({ ok: true, referrals: Array.from(REFERRALS.values()) });
+  validate(ListQuerySchema, "query"),
+  asyncHandler(async (req, res) => {
+    const { limit, cursor } = req.query as unknown as z.infer<typeof ListQuerySchema>;
+    let q = supabase.from("referrals").select("*").order("created_at", { ascending: false }).limit(limit);
+
+    if (cursor) {
+      // fetch items created BEFORE cursor timestamp
+      q = q.lt("created_at", cursor);
+    }
+
+    const { data, error } = await q;
+    if (error) throw new AppError(error.message, 500);
+
+    const nextCursor = data.length === limit ? data[data.length - 1].created_at : null;
+
+    res.json({
+      ok: true,
+      referrals: data.map((r) => ({
+        id: r.id,
+        hostEmail: r.host_email,
+        vendorId: r.vendor_id,
+        note: r.note ?? undefined,
+        status: r.status,
+        createdAt: r.created_at,
+      })),
+      nextCursor,
+    });
   })
 );
 
-/** ---------- Error middleware (last) ---------- */
+/** ---------- Error middleware ---------- */
 app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   const isValidation = err?.message === "ValidationError";
   const status = isValidation ? 400 : err?.status ?? 500;
