@@ -1,3 +1,4 @@
+// api/[...route].ts
 import express from "express";
 import helmet from "helmet";
 import cors from "cors";
@@ -6,34 +7,29 @@ import { z } from "zod";
 import { nanoid } from "nanoid";
 import rateLimit from "express-rate-limit";
 import { v4 as uuidv4 } from "uuid";
-import { supabase } from "./_supabase";
+import { supabase } from "./_supabase"; // present from Block 3
 
 const app = express();
 
-/** ---------- Middlewares ---------- */
+/** ---------- Middlewares (kept simple/robust) ---------- */
 app.use(helmet());
 
-// 🔒 CORS allowlist (change later to your real domains)
-const allowedOrigins = ["https://yourdomain.com", "http://localhost:3000"];
-app.use(
-  cors({
-    origin: (origin, cb) => (!origin || allowedOrigins.includes(origin) ? cb(null, true) : cb(new Error("Not allowed by CORS"))),
-  })
-);
+// Allow all origins for now so healthz/POST work everywhere.
+// (We can lock this down later with an allowlist.)
+app.use(cors({ origin: true, credentials: true }));
 
 app.use(express.json());
 
-// ⚡ Rate limiting
+// Basic rate limit
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
 
-// 🪪 Request IDs
+// Request IDs for logs
 app.use((req, _res, next) => {
   (req as any).id = uuidv4();
-  console.log(`[${(req as any).id}] ${req.method} ${req.url}`);
   next();
 });
 
-/** ---------- Utils ---------- */
+/** ---------- Helpers ---------- */
 class AppError extends Error {
   status: number;
   constructor(message: string, status = 400) {
@@ -46,19 +42,18 @@ const asyncHandler =
   (req, res, next) =>
     Promise.resolve(fn(req, res, next)).catch(next);
 
-function validate<T extends z.ZodTypeAny>(schema: T, source: "body" | "query" | "params" = "body") {
-  return (req: express.Request, _res: express.Response, next: express.NextFunction) => {
-    const parsed = schema.safeParse((req as any)[source]);
+const validate =
+  <T extends z.ZodTypeAny>(schema: T, source: "body" | "query" | "params" = "body") =>
+  (req: any, _res: any, next: any) => {
+    const parsed = schema.safeParse(req[source]);
     if (!parsed.success) {
-      const details = parsed.error.flatten();
       const err: any = new AppError("ValidationError", 400);
-      err.details = details;
+      err.details = parsed.error.flatten();
       return next(err);
     }
-    (req as any)[source] = parsed.data;
+    req[source] = parsed.data;
     next();
   };
-}
 
 /** ---------- Schemas ---------- */
 const CreateReferralSchema = z.object({
@@ -69,15 +64,15 @@ const CreateReferralSchema = z.object({
 const IdParamSchema = z.object({ id: z.string().min(1) });
 const ListQuerySchema = z.object({
   limit: z.coerce.number().min(1).max(100).default(50),
-  cursor: z.string().optional(), // use created_at ISO as cursor (or id)
+  cursor: z.string().optional(), // ISO timestamp
 });
 
 /** ---------- Routes ---------- */
 
-// Health check
+// Health check – should match your working /api/healthz
 app.get("/healthz", (_req, res) => res.json({ ok: true }));
 
-// Create referral (DB)
+// Create referral (Supabase)
 app.post(
   "/referrals",
   validate(CreateReferralSchema, "body"),
@@ -107,15 +102,15 @@ app.post(
   })
 );
 
-// Get by ID
+// Get referral by ID
 app.get(
   "/referrals/:id",
   validate(IdParamSchema, "params"),
   asyncHandler(async (req, res) => {
     const { id } = req.params as z.infer<typeof IdParamSchema>;
-
     const { data, error } = await supabase.from("referrals").select("*").eq("id", id).single();
-    if (error?.code === "PGRST116") throw new AppError("Referral not found", 404); // no rows
+
+    if (error?.code === "PGRST116") throw new AppError("Referral not found", 404);
     if (error) throw new AppError(error.message, 500);
 
     res.json({
@@ -132,18 +127,15 @@ app.get(
   })
 );
 
-// List (cursor + limit)
+// List referrals (cursor pagination)
 app.get(
   "/referrals",
   validate(ListQuerySchema, "query"),
   asyncHandler(async (req, res) => {
     const { limit, cursor } = req.query as unknown as z.infer<typeof ListQuerySchema>;
-    let q = supabase.from("referrals").select("*").order("created_at", { ascending: false }).limit(limit);
 
-    if (cursor) {
-      // fetch items created BEFORE cursor timestamp
-      q = q.lt("created_at", cursor);
-    }
+    let q = supabase.from("referrals").select("*").order("created_at", { ascending: false }).limit(limit);
+    if (cursor) q = q.lt("created_at", cursor);
 
     const { data, error } = await q;
     if (error) throw new AppError(error.message, 500);
@@ -165,7 +157,7 @@ app.get(
   })
 );
 
-/** ---------- Error middleware ---------- */
+/** ---------- Error handler (last) ---------- */
 app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   const isValidation = err?.message === "ValidationError";
   const status = isValidation ? 400 : err?.status ?? 500;
@@ -178,5 +170,5 @@ app.use((err: any, req: express.Request, res: express.Response, _next: express.N
   res.status(status).json(payload);
 });
 
-/** ---------- Export ---------- */
+/** ---------- Export for Vercel ---------- */
 export default serverless(app);
