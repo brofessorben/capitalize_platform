@@ -17,3 +17,4 @@ This repo powers the CAPITALIZE referral engine on Vercel.
 - Request IDs for easy logging
 - Zod validation for all inputs
 - In-memory referral store (replace with DB later)
+<!-- redeploy -->
