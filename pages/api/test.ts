@@ -17,12 +17,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     if (req.method === "POST") {
-      const body = req.body ?? null;
-      res.status(200).json({ ok: true, supabase_ready: true, echo: body });
+      res.status(200).json({ ok: true, supabase_ready: true, echo: req.body ?? null });
       return;
     }
 
-    res.status(405).end(); // method not allowed
+    res.status(405).end();
   } catch (err: any) {
     res.status(500).json({ ok: false, error: err?.message ?? "unknown_error" });
   }
