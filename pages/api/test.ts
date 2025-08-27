@@ -1,15 +1,31 @@
+// pages/api/test.ts
 import type { NextApiRequest, NextApiResponse } from "next";
+import { createClient } from "@supabase/supabase-js";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method === "POST") {
-    try {
-      // Parse raw body if needed
-      const body = req.body || {};
-      res.status(200).json({ ok: true, body });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Server error" });
+  try {
+    // Supabase client (uses your env vars on Vercel)
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL as string,
+      process.env.SUPABASE_ANON_KEY as string
+    );
+
+    if (req.method === "GET") {
+      const { error } = await supabase.auth.getSession();
+      if (error) throw error;
+      res.status(200).json({ ok: true, supabase_ready: true });
+      return;
     }
-  } else {
-    res.status(405).json({ error: "Only POST allowed" });
+
+    if (req.method === "POST") {
+      const { error } = await supabase.auth.getSession();
+      if (error) throw error;
+      res.status(200).json({ ok: true, supabase_ready: true, echo: req.body ?? null });
+      return;
+    }
+
+    res.status(405).end();
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err?.message ?? "unknown_error" });
   }
 }
