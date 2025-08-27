@@ -4,7 +4,6 @@ import { createClient } from "@supabase/supabase-js";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
-    // Supabase client (uses your env vars on Vercel)
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL as string,
       process.env.SUPABASE_ANON_KEY as string
@@ -18,13 +17,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     if (req.method === "POST") {
-      const { error } = await supabase.auth.getSession();
-      if (error) throw error;
-      res.status(200).json({ ok: true, supabase_ready: true, echo: req.body ?? null });
+      const body = req.body ?? null;
+      res.status(200).json({ ok: true, supabase_ready: true, echo: body });
       return;
     }
 
-    res.status(405).end();
+    res.status(405).end(); // method not allowed
   } catch (err: any) {
     res.status(500).json({ ok: false, error: err?.message ?? "unknown_error" });
   }
