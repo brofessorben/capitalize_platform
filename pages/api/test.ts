@@ -1,12 +1,10 @@
-// pages/api/test.ts
-import type { NextApiRequest, NextApiResponse } from "next";
 import { createClient } from "@supabase/supabase-js";
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req, res) {
   try {
     const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL as string,
-      process.env.SUPABASE_ANON_KEY as string
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.SUPABASE_ANON_KEY
     );
 
     if (req.method === "GET") {
@@ -21,8 +19,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return;
     }
 
-    res.status(405).end();
-  } catch (err: any) {
+    res.status(405).end(); // method not allowed
+  } catch (err) {
     res.status(500).json({ ok: false, error: err?.message ?? "unknown_error" });
   }
 }
