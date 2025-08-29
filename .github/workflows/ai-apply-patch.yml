@@ -2,10 +2,10 @@ name: AI Apply Patch
 on:
   workflow_dispatch:
     inputs:
-      patch_path:
-        description: Path to .diff or .patch in the repo
+      patch_file:
+        description: Path to file(s) in .ai/patches to copy into repo
         required: true
-        default: .ai/patches/latest.diff
+        default: .ai/patches/time-file-only.js
 
 permissions:
   contents: write
@@ -16,17 +16,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Apply patch
+      - name: Copy patch file(s)
         run: |
-          git apply "${{ github.workspace }}/${{ inputs.patch_path }}"
+          mkdir -p pages/api
+          cp ${{ inputs.patch_file }} pages/api/time.js
 
-      - name: Open PR
+      - name: Commit & PR
         uses: peter-evans/create-pull-request@v6
         with:
-          title: "AI patch: ${{ inputs.patch_path }}"
-          body: "Automated patch application from `${{ inputs.patch_path }}`."
-          commit-message: "Apply AI patch: ${{ inputs.patch_path }}"
+          title: "AI patch: add file(s)"
+          body: "Automated copy from `${{ inputs.patch_file }}`"
+          commit-message: "Add file(s) from patches"
           branch: "ai/patch-${{ github.run_id }}"
