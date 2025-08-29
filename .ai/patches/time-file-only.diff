@@ -1,0 +1,14 @@
+diff --git a/pages/api/time.js b/pages/api/time.js
+new file mode 100644
+--- /dev/null
++++ b/pages/api/time.js
+@@ -0,0 +12 @@
++// Simple time endpoint for health/demo
++export default function handler(req, res) {
++  // Prevent caching so 'now' is always fresh
++  res.setHeader('Cache-Control', 'no-store');
++  res.status(200).json({
++    ok: true,
++    now: new Date().toISOString()
++  });
++}
