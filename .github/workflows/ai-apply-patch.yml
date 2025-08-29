@@ -1,0 +1,32 @@
+name: AI Apply Patch
+on:
+  workflow_dispatch:
+    inputs:
+      patch_path:
+        description: Path to .diff or .patch in the repo
+        required: true
+        default: .ai/patches/latest.diff
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply patch
+        run: |
+          git apply "${{ github.workspace }}/${{ inputs.patch_path }}"
+
+      - name: Open PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          title: "AI patch: ${{ inputs.patch_path }}"
+          body: "Automated patch application from `${{ inputs.patch_path }}`."
+          commit-message: "Apply AI patch: ${{ inputs.patch_path }}"
+          branch: "ai/patch-${{ github.run_id }}"
