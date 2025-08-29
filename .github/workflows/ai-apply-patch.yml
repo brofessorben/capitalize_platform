@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       patch_file:
-        description: Path to file(s) in .ai/patches to copy into repo
+        description: Path to file in .ai/patches to copy into repo
         required: true
         default: .ai/patches/time-file-only.js
 
@@ -19,26 +19,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Create branch
-        run: |
-          git checkout -b ai/patch-${{ github.run_id }}
-
+      # Stay on the default branch (main). Do NOT git checkout a new branch.
       - name: Copy file into repo
         run: |
           mkdir -p pages/api
-          cp ${{ inputs.patch_file }} pages/api/time.js
-
-      - name: Commit & push
-        run: |
-          git config user.name "ai-bot"
-          git config user.email "ai-bot@users.noreply.github.com"
-          git add -A
-          git commit -m "Add file from ${{ inputs.patch_file }}" || echo "Nothing to commit"
-          git push --set-upstream origin HEAD
+          cp "${{ inputs.patch_file }}" pages/api/time.js
 
       - name: Open PR
         uses: peter-evans/create-pull-request@v6
         with:
           title: "AI patch: add time endpoint"
           body: "Automated copy from `${{ inputs.patch_file }}`"
+          commit-message: "Add file from ${{ inputs.patch_file }}"
           branch: "ai/patch-${{ github.run_id }}"
+          base: "main"
