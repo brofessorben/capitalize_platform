@@ -5,7 +5,11 @@ on:
       patch_file:
         description: Path to file in .ai/patches to copy into repo
         required: true
-        default: .ai/patches/time-file-only.js
+        default: .ai/patches/referrals.js
+      dest_path:
+        description: Destination path in repo (where to place the file)
+        required: true
+        default: pages/api/referrals.js
 
 permissions:
   contents: write
@@ -19,17 +23,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Stay on the default branch (main). Do NOT git checkout a new branch.
+      # Stay on default branch (main). Let the PR action create a feature branch.
       - name: Copy file into repo
         run: |
-          mkdir -p pages/api
-          cp "${{ inputs.patch_file }}" pages/api/time.js
+          mkdir -p "$(dirname "${{ inputs.dest_path }}")"
+          cp "${{ inputs.patch_file }}" "${{ inputs.dest_path }}"
 
       - name: Open PR
         uses: peter-evans/create-pull-request@v6
         with:
-          title: "AI patch: add time endpoint"
-          body: "Automated copy from `${{ inputs.patch_file }}`"
-          commit-message: "Add file from ${{ inputs.patch_file }}"
+          title: "AI patch: ${ { inputs.dest_path } }"
+          body: "Automated copy from `${{ inputs.patch_file }}` to `${{ inputs.dest_path }}`"
+          commit-message: "Add ${ { inputs.dest_path } } from ${{ inputs.patch_file }}"
           branch: "ai/patch-${{ github.run_id }}"
           base: "main"
