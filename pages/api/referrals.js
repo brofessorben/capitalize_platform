@@ -1,56 +1,69 @@
-// pages/api/referrals.js
-import { createClient } from "@supabase/supabase-js";
+// pages/api/referrals.js (copied in by workflow)
+// Minimal POST endpoint with input validation (no DB yet).
 
-function sb() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.SUPABASE_ANON_KEY
-  );
+function bad(res, status, msg, details = undefined) {
+  res.status(status).json({ ok: false, error: msg, details });
+}
+
+function isEmail(s) {
+  return typeof s === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 }
 
 export default async function handler(req, res) {
-  const supabase = sb();
+  // CORS (basic)
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-  try {
-    if (req.method === "POST") {
-      const { id, host_email, vendor_id, note, status } = req.body || {};
-      if (!host_email || !vendor_id) {
-        res.status(400).json({ ok: false, error: "host_email_and_vendor_id_required" });
-        return;
-      }
-
-      const record = {
-        id: id || crypto.randomUUID(),
-        host_email,
-        vendor_id,
-        note: note ?? null,
-        status: status ?? "PENDING"
-      };
-
-      const { data, error } = await supabase
-        .from("referrals")
-        .insert([record])
-        .select()
-        .single();
-
-      if (error) throw error;
-      res.status(201).json({ ok: true, referral: data });
-      return;
-    }
-
-    if (req.method === "GET") {
-      const { host_email, vendor_id } = req.query || {};
-      let q = supabase.from("referrals").select("*").order("created_at", { ascending: false }).limit(100);
-      if (host_email) q = q.eq("host_email", host_email);
-      if (vendor_id) q = q.eq("vendor_id", vendor_id);
-      const { data, error } = await q;
-      if (error) throw error;
-      res.status(200).json({ ok: true, referrals: data });
-      return;
-    }
-
-    res.status(405).end();
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err?.message ?? "unknown_error" });
+  if (req.method === "OPTIONS") {
+    return res.status(204).end();
   }
+
+  if (req.method !== "POST") {
+    return bad(res, 405, "Method not allowed");
+  }
+
+  if (!req.headers["content-type"]?.includes("application/json")) {
+    return bad(res, 415, "Content-Type must be application/json");
+  }
+
+  let body;
+  try {
+    body = req.body && typeof req.body === "object" ? req.body : JSON.parse(req.body || "{}");
+  } catch {
+    return bad(res, 400, "Invalid JSON body");
+  }
+
+  const { host, vendor, referrer, notes } = body;
+
+  const errors = [];
+  if (!host || typeof host !== "string" || host.trim().length < 2) {
+    errors.push({ field: "host", message: "host (string, ≥2 chars) is required" });
+  }
+  if (!vendor || typeof vendor !== "string" || vendor.trim().length < 2) {
+    errors.push({ field: "vendor", message: "vendor (string, ≥2 chars) is required" });
+  }
+  if (!referrer || !isEmail(referrer)) {
+    errors.push({ field: "referrer", message: "referrer must be a valid email" });
+  }
+  if (notes && typeof notes !== "string") {
+    errors.push({ field: "notes", message: "notes must be a string if provided" });
+  }
+
+  if (errors.length) {
+    return bad(res, 400, "Validation failed", errors);
+  }
+
+  // For now, we just echo back. (DB will come next patch.)
+  const referral = {
+    id: `tmp_${Date.now()}`, // placeholder
+    host: host.trim(),
+    vendor: vendor.trim(),
+    referrer: referrer.toLowerCase(),
+    notes: notes?.trim() || null,
+    createdAt: new Date().toISOString(),
+    source: "api",
+  };
+
+  res.status(200).json({ ok: true, referral });
 }
