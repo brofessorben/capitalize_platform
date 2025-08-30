@@ -1,14 +1,13 @@
-"use client";
-import { useRouter } from "next/navigation";
+import BackButton from "@/app/components/BackButton";
 
-export default function BackButton({ label = "Back" }) {
-  const r = useRouter();
+export default function ReferrerDash() {
   return (
-    <button
-      onClick={() => r.back()}
-      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border hover:bg-gray-50 transition"
-    >
-      ← {label}
-    </button>
+    <div className="space-y-8">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Referrer Dashboard</h1>
+        <BackButton />
+      </div>
+      {/* form / content here */}
+    </div>
   );
 }
