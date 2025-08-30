@@ -1,11 +1,10 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
-import BackButton from "../../../components/BackButton";
+import {useEffect, useMemo, useRef, useState} from "react";
 
 const ROLE_OPTIONS = [
-  { id: "vendor", label: "Vendor", badge: "🧑‍🍳", color: "bg-blue-600" },
-  { id: "host", label: "Host", badge: "🧑‍💼", color: "bg-amber-600" },
-  { id: "referrer", label: "Referrer", badge: "🧭", color: "bg-emerald-600" },
+  { id: "vendor",   label: "Vendor",   badge: "🧑‍🍳", color: "bg-blue-600" },
+  { id: "host",     label: "Host",     badge: "🧑‍💼", color: "bg-amber-600" },
+  { id: "referrer", label: "Referrer", badge: "🧭",   color: "bg-emerald-600" },
 ];
 
 export default function ChatPage({ params }) {
@@ -25,20 +24,15 @@ export default function ChatPage({ params }) {
 
   useEffect(() => {
     const el = scrollerRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
   const grouped = useMemo(() => {
-    const out = [];
-    let last = null;
+    const out = []; let last = null;
     for (const m of messages) {
       const t = new Date(m.created_at || Date.now());
       const key = `${m.sender}-${t.getHours()}:${t.getMinutes()}`;
-      if (!last || last.key !== key) {
-        last = { key, sender: m.sender, when: t, items: [] };
-        out.push(last);
-      }
+      if (!last || last.key !== key) { last = { key, sender: m.sender, when: t, items: [] }; out.push(last); }
       last.items.push(m);
     }
     return out;
@@ -62,10 +56,7 @@ export default function ChatPage({ params }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Chat error");
-      setMessages((m) => [
-        ...m,
-        { sender: "ai", role: "assistant", text: data.reply, created_at: new Date().toISOString() },
-      ]);
+      setMessages((m) => [...m, { sender: "ai", role: "assistant", text: data.reply, created_at: new Date().toISOString() }]);
     } catch (err) {
       alert(err.message || "Error");
     } finally {
@@ -73,9 +64,7 @@ export default function ChatPage({ params }) {
     }
   }
 
-  function handleKeyDown(e) {
-    if (e.key === "Enter" && !e.shiftKey) sendMessage(e);
-  }
+  function handleKeyDown(e) { if (e.key === "Enter" && !e.shiftKey) sendMessage(e); }
 
   return (
     <div className="min-h-dvh bg-white">
@@ -107,9 +96,7 @@ export default function ChatPage({ params }) {
 
       <div className="mx-auto max-w-4xl px-4 py-4">
         <div ref={scrollerRef} className="h-[70vh] border rounded-2xl bg-gray-50 p-4 overflow-y-auto shadow-inner">
-          {grouped.length === 0 && (
-            <EmptyState onClick={() => setInput("We can do $30/pp for 120 guests. Any dietary restrictions?")} />
-          )}
+          {grouped.length === 0 && <EmptyState onClick={() => setInput("We can do $30/pp for 120 guests. Any dietary restrictions?")} />}
           <div className="space-y-4">
             {grouped.map((g, idx) => (
               <MessageGroup key={idx} sender={g.sender} when={g.when} items={g.items} />
@@ -125,13 +112,11 @@ export default function ChatPage({ params }) {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
           />
-          <button
-            disabled={sending || input.trim() === ""}
-            className="shrink-0 px-5 h-12 rounded-2xl bg-black text-white font-medium disabled:opacity-50"
-          >
+          <button disabled={sending || input.trim() === ""} className="shrink-0 px-5 h-12 rounded-2xl bg-black text-white font-medium disabled:opacity-50">
             {sending ? "Sending…" : "Send"}
           </button>
         </form>
+
         <div className="mt-2 text-xs text-gray-500">
           Pro tip: switch roles (Vendor/Host/Referrer) to speak as that party. AI replies with next best step.
         </div>
@@ -140,7 +125,7 @@ export default function ChatPage({ params }) {
   );
 }
 
-/* ---------- UI bits ---------- */
+/* ---- UI bits ---- */
 function MessageGroup({ sender, when, items }) {
   const meta = getSenderMeta(sender);
   const align = sender === "ai" ? "items-start" : "items-end";
@@ -151,15 +136,12 @@ function MessageGroup({ sender, when, items }) {
       <div className="flex flex-col gap-1">
         <div className="text-[11px] text-gray-500">{meta.label} • {formatTime(when)}</div>
         {items.map((m, i) => (
-          <div
-            key={i}
-            className={`${bubbleBase} ${
-              sender === "ai" ? "bg-white border-gray-200"
-                : sender === "vendor" ? "bg-blue-600 text-white border-blue-700"
-                : sender === "host" ? "bg-amber-600 text-white border-amber-700"
-                : "bg-emerald-600 text-white border-emerald-700"
-            }`}
-          >
+          <div key={i} className={`${bubbleBase} ${
+            sender === "ai" ? "bg-white border-gray-200" :
+            sender === "vendor" ? "bg-blue-600 text-white border-blue-700" :
+            sender === "host" ? "bg-amber-600 text-white border-amber-700" :
+            "bg-emerald-600 text-white border-emerald-700"
+          }`}>
             {m.text}
           </div>
         ))}
@@ -168,15 +150,13 @@ function MessageGroup({ sender, when, items }) {
     </div>
   );
 }
-
-function Avatar({ meta, right = false }) {
+function Avatar({ meta, right=false }) {
   return (
-    <div className={`w-8 h-8 rounded-xl grid place-items-center ${meta.color} text-white`}>
+    <div className={`w-8 h-8 rounded-xl grid place-items-center ${right ? "" : ""} ${meta.color} text-white`}>
       <span className="text-base" title={meta.label}>{meta.badge}</span>
     </div>
   );
 }
-
 function EmptyState({ onClick }) {
   return (
     <div className="h-full grid place-items-center">
@@ -189,13 +169,12 @@ function EmptyState({ onClick }) {
     </div>
   );
 }
-
 function getSenderMeta(sender) {
   switch (sender) {
-    case "vendor": return { label: "Vendor", badge: "🧑‍🍳", color: "bg-blue-600" };
-    case "host": return { label: "Host", badge: "🧑‍💼", color: "bg-amber-600" };
-    case "referrer": return { label: "Referrer", badge: "🧭", color: "bg-emerald-600" };
-    default: return { label: "AI", badge: "🤖", color: "bg-gray-900" };
+    case "vendor":   return { label: "Vendor",   badge: "🧑‍🍳", color: "bg-blue-600" };
+    case "host":     return { label: "Host",     badge: "🧑‍💼", color: "bg-amber-600" };
+    case "referrer": return { label: "Referrer", badge: "🧭",   color: "bg-emerald-600" };
+    default:         return { label: "AI",       badge: "🤖",   color: "bg-gray-900" };
   }
 }
 function formatTime(d) {
