@@ -1,7 +1,8 @@
 "use client";
 import { useMemo, useState } from "react";
+import BackButton from "@/app/components/BackButton";
 
-/** -------- Industry definitions (tweak anytime) -------- */
+// -------- Industries & dynamic fields --------
 const INDUSTRIES = [
   { id: "catering", label: "Food & Catering" },
   { id: "real_estate", label: "Real Estate" },
@@ -13,7 +14,6 @@ const INDUSTRIES = [
   { id: "other", label: "Other" },
 ];
 
-// Field blueprints per industry
 const FIELDS_BY_INDUSTRY = {
   catering: [
     { key: "event_type", label: "Event Type", type: "select", options: ["Wedding", "Corporate Lunch", "Birthday", "Graduation", "Festival", "Other"] },
@@ -57,22 +57,16 @@ const FIELDS_BY_INDUSTRY = {
   ],
 };
 
-/** -------- Utility: safe JSON fetch with useful errors -------- */
+// -------- safe JSON fetch --------
 async function fetchJSON(url, opts = {}) {
   const res = await fetch(url, opts);
   const ct = res.headers.get("content-type") || "";
-  const text = await res.text();
-  const maybeJSON = ct.includes("application/json");
-  const body = maybeJSON && text ? JSON.parse(text) : { error: text?.slice(0, 200) || null };
-
-  if (!res.ok) {
-    const msg = body?.error || `HTTP ${res.status}`;
-    throw new Error(`${msg}`);
-  }
+  const txt = await res.text();
+  const body = ct.includes("application/json") && txt ? JSON.parse(txt) : { error: txt || null };
+  if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`);
   return body;
 }
 
-/** ------------------- Component ------------------- */
 export default function ReferrerDash() {
   const [industry, setIndustry] = useState("catering");
   const [form, setForm] = useState({
@@ -80,17 +74,14 @@ export default function ReferrerDash() {
     vendor: "Roadhouse Grille",
     referrer: "Ben",
     notes: "",
-    // generic optional pricing primitives (used when present)
     headcount: "",
     price_per_person: "",
     referrer_fee_pct: 11,
-    // dynamic fields will be added as keys on demand
   });
   const [submitting, setSubmitting] = useState(false);
 
   const fields = FIELDS_BY_INDUSTRY[industry] || [];
   const subtotal = useMemo(() => {
-    // only compute for classic “per person” flows
     if (!form.headcount || !form.price_per_person) return 0;
     const s = Number(form.headcount) * Number(form.price_per_person);
     return Number.isFinite(s) ? s : 0;
@@ -99,23 +90,19 @@ export default function ReferrerDash() {
   const referrerCut = subtotal ? (subtotal * Number(form.referrer_fee_pct || 0)) / 100 : 0;
   const vendorTake = subtotal ? subtotal - referrerCut : 0;
 
-  function setVal(key, val) {
-    setForm((f) => ({ ...f, [key]: val }));
+  function setVal(k, v) {
+    setForm((f) => ({ ...f, [k]: v }));
   }
 
   async function submitLead(e) {
     e.preventDefault();
     setSubmitting(true);
     try {
-      // Build a compact “context note” based on industry-specific fields
       const parts = [];
       parts.push(INDUSTRIES.find((i) => i.id === industry)?.label || industry);
-
       for (const f of fields) {
         const v = form[f.key];
-        if (v !== undefined && v !== "") {
-          parts.push(`${f.label}: ${v}`);
-        }
+        if (v !== undefined && v !== "") parts.push(`${f.label}: ${v}`);
       }
       if (form.headcount) parts.push(`Headcount: ${form.headcount}`);
       if (form.price_per_person) parts.push(`$${Number(form.price_per_person).toFixed(2)}/pp`);
@@ -134,7 +121,7 @@ export default function ReferrerDash() {
       });
       const lead = leadResp.lead;
 
-      // 2) create proposal (pricing optional)
+      // 2) create proposal
       const terms = {
         industry,
         fields: Object.fromEntries(fields.map((f) => [f.key, form[f.key] ?? null])),
@@ -155,7 +142,6 @@ export default function ReferrerDash() {
       });
 
       alert("Lead + Proposal created!");
-      // reset minimal fields
       setForm((f) => ({
         ...f,
         host: "",
@@ -163,6 +149,8 @@ export default function ReferrerDash() {
         headcount: "",
         price_per_person: "",
       }));
+      // Optional: jump straight into chat
+      // window.location.href = `/chat/${lead.id}`;
     } catch (err) {
       alert(err.message || "Submit error");
     } finally {
@@ -172,17 +160,18 @@ export default function ReferrerDash() {
 
   return (
     <div className="space-y-8">
-      <h1 className="text-2xl font-bold">Referrer Dashboard</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Referrer Dashboard</h1>
+        <BackButton />
+      </div>
 
       <form onSubmit={submitLead} className="space-y-4 max-w-2xl border rounded-2xl p-5 bg-white">
-        {/* Top line: Host/Vendor/Referrer */}
         <div className="grid md:grid-cols-3 gap-3">
           <input className="border rounded p-2" placeholder="Host (e.g., Anna)" value={form.host} onChange={(e) => setVal("host", e.target.value)} required />
           <input className="border rounded p-2" placeholder="Vendor" value={form.vendor} onChange={(e) => setVal("vendor", e.target.value)} />
           <input className="border rounded p-2" placeholder="Your name (referrer)" value={form.referrer} onChange={(e) => setVal("referrer", e.target.value)} />
         </div>
 
-        {/* Industry */}
         <div className="grid md:grid-cols-2 gap-3">
           <label className="text-sm font-semibold">Industry</label>
           <select className="border rounded p-2" value={industry} onChange={(e) => setIndustry(e.target.value)}>
@@ -192,7 +181,6 @@ export default function ReferrerDash() {
           </select>
         </div>
 
-        {/* Dynamic fields */}
         <div className="grid md:grid-cols-2 gap-3">
           {fields.map((f) =>
             f.type === "select" ? (
@@ -222,7 +210,6 @@ export default function ReferrerDash() {
           )}
         </div>
 
-        {/* Optional classic pricing (visible for any industry, ignored if empty) */}
         <div className="grid md:grid-cols-2 gap-3 items-end">
           <input className="border rounded p-2" type="number" placeholder="Headcount (optional)" value={form.headcount} onChange={(e) => setVal("headcount", e.target.value)} />
           <div className="grid grid-cols-2 gap-3 items-end">
@@ -242,7 +229,6 @@ export default function ReferrerDash() {
           </div>
         </div>
 
-        {/* Fee slider */}
         <div>
           <label className="text-sm font-semibold">Referral Fee: {form.referrer_fee_pct}%</label>
           <input
