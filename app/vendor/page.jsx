@@ -31,9 +31,7 @@ export default function VendorDash() {
         <h2 className="font-semibold">Draft Proposals</h2>
         <div className="grid gap-3">
           {proposals.length === 0 && (
-            <div className="rounded-2xl border p-4 text-sm text-gray-600">
-              No drafts yet.
-            </div>
+            <div className="rounded-2xl border p-4 text-sm text-gray-600">No drafts yet.</div>
           )}
           {proposals.map((p) => {
             const t = p.terms || {};
