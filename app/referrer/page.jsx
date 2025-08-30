@@ -1,39 +1,75 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+
+const EVENT_TYPES = ["Wedding", "Corporate Lunch", "Birthday", "Graduation", "Festival", "Other"];
 
 export default function ReferrerDash() {
-  const [form, setForm] = useState({ host: "", vendor: "", referrer: "", notes: "" });
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState("");
-  const [ok, setOk] = useState("");
-  const [leads, setLeads] = useState([]);
+  const [form, setForm] = useState({
+    host: "",
+    vendor: "Roadhouse Grille",
+    referrer: "Ben",
+    notes: "",
+    event_type: "Wedding",
+    headcount: "",
+    price_per_person: "",
+    referrer_fee_pct: 11, // default baseline
+  });
+  const [submitting, setSubmitting] = useState(false);
 
-  async function loadLeads() {
-    const r = await fetch("/api/leads");
-    const d = await r.json();
-    setLeads(d.leads || []);
-  }
+  const subtotal = form.headcount && form.price_per_person
+    ? Number(form.headcount) * Number(form.price_per_person)
+    : 0;
+  const referrerCut = subtotal ? (subtotal * form.referrer_fee_pct) / 100 : 0;
+  const vendorTake = subtotal ? subtotal - referrerCut : 0;
 
-  useEffect(() => { loadLeads(); }, []);
-
-  async function submit(e) {
+  async function submitLead(e) {
     e.preventDefault();
-    setErr(""); setOk(""); setLoading(true);
+    setSubmitting(true);
     try {
-      const r = await fetch("/api/leads", {
+      const leadRes = await fetch("/api/leads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          host: form.host,
+          vendor: form.vendor,
+          referrer: form.referrer,
+          notes: `${form.event_type} • ${form.headcount || "?"} ppl • ${form.notes}`.trim(),
+        }),
       });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || "Failed");
-      setOk("Lead submitted ✅");
-      setForm({ host: "", vendor: "", referrer: "", notes: "" });
-      await loadLeads();
-    } catch (e) {
-      setErr(e.message || "Error");
+      const leadData = await leadRes.json();
+      if (!leadRes.ok) throw new Error(leadData?.error || "Lead error");
+      const lead = leadData.lead;
+
+      const terms = {
+        event_type: form.event_type,
+        headcount: form.headcount ? Number(form.headcount) : null,
+        price_per_person: form.price_per_person ? Number(form.price_per_person) : null,
+        subtotal: subtotal || null,
+        referrer_fee_pct: form.referrer_fee_pct,
+        referrer_cut: referrerCut || null,
+        vendor_take: vendorTake || null,
+        notes: form.notes,
+      };
+
+      const propRes = await fetch("/api/proposals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lead_id: lead.id,
+          vendor: form.vendor,
+          terms,
+          status: "draft",
+        }),
+      });
+      const propData = await propRes.json();
+      if (!propRes.ok) throw new Error(propData?.error || "Proposal error");
+
+      alert("Lead + Proposal created!");
+      setForm((f) => ({ ...f, host: "", notes: "" }));
+    } catch (err) {
+      alert(err.message || "Error");
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   }
 
@@ -41,70 +77,44 @@ export default function ReferrerDash() {
     <div className="space-y-8">
       <h1 className="text-2xl font-bold">Referrer Dashboard</h1>
 
-      {/* KPIs */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <KPI label="Leads Submitted" value={leads.length} />
-        <KPI label="Booked" value={leads.filter(l => l.status === "booked").length} />
-        <KPI label="Pending" value={leads.filter(l => l.status === "pending").length} />
-        <KPI label="Earnings" value="$0.00" />
-      </div>
-
-      {/* Submit Lead */}
-      <form onSubmit={submit} className="space-y-3 max-w-xl border rounded-2xl p-4">
+      <form onSubmit={submitLead} className="space-y-3 max-w-xl border rounded-2xl p-4">
         <h2 className="font-semibold">Submit a Referral</h2>
+
         <input className="w-full border rounded p-2" placeholder="Host (e.g., Anna)"
-               value={form.host} onChange={e=>setForm({...form, host: e.target.value})}/>
-        <input className="w-full border rounded p-2" placeholder="Vendor (e.g., Roadhouse Grille)"
-               value={form.vendor} onChange={e=>setForm({...form, vendor: e.target.value})}/>
-        <input className="w-full border rounded p-2" placeholder="Your name (referrer)"
-               value={form.referrer} onChange={e=>setForm({...form, referrer: e.target.value})}/>
-        <textarea className="w-full border rounded p-2" placeholder="Notes"
-                  value={form.notes} onChange={e=>setForm({...form, notes: e.target.value})}/>
-        <button disabled={loading} className="px-4 py-2 rounded-xl bg-black text-white">
-          {loading ? "Submitting..." : "Submit"}
-        </button>
-        {ok && <div className="text-green-600 text-sm">{ok}</div>}
-        {err && <div className="text-red-600 text-sm">{err}</div>}
-      </form>
+          value={form.host} onChange={(e)=>setForm({...form,host:e.target.value})} required/>
 
-      {/* Leads list */}
-      <section className="space-y-3">
-        <h2 className="font-semibold">Recent Leads</h2>
-        <div className="rounded-2xl border overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <Th>Created</Th><Th>Host</Th><Th>Vendor</Th><Th>Referrer</Th><Th>Status</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {leads.map((l) => (
-                <tr key={l.id} className="border-t">
-                  <Td>{new Date(l.created_at).toLocaleString()}</Td>
-                  <Td>{l.host}</Td>
-                  <Td>{l.vendor}</Td>
-                  <Td>{l.referrer}</Td>
-                  <Td>{l.status}</Td>
-                </tr>
-              ))}
-              {leads.length === 0 && (
-                <tr><td className="p-3 text-gray-500" colSpan={5}>No leads yet.</td></tr>
-              )}
-            </tbody>
-          </table>
+        <select className="border rounded p-2 w-full"
+          value={form.event_type} onChange={(e)=>setForm({...form,event_type:e.target.value})}>
+          {EVENT_TYPES.map(e => <option key={e} value={e}>{e}</option>)}
+        </select>
+
+        <div className="grid grid-cols-2 gap-3">
+          <input className="border rounded p-2" placeholder="Headcount (optional)" type="number"
+            value={form.headcount} onChange={(e)=>setForm({...form,headcount:e.target.value})}/>
+          <input className="border rounded p-2" placeholder="Price per person (optional)" type="number" step="0.01"
+            value={form.price_per_person} onChange={(e)=>setForm({...form,price_per_person:e.target.value})}/>
         </div>
-      </section>
-    </div>
-  );
-}
 
-function KPI({ label, value }) {
-  return (
-    <div className="rounded-2xl border p-4">
-      <div className="text-sm text-gray-500">{label}</div>
-      <div className="text-2xl font-bold">{value}</div>
+        <div>
+          <label className="text-sm font-semibold">Referral Fee: {form.referrer_fee_pct}%</label>
+          <input type="range" min="5" max="22" value={form.referrer_fee_pct}
+            onChange={(e)=>setForm({...form,referrer_fee_pct:Number(e.target.value)})}
+            className="w-full"/>
+          {subtotal > 0 && (
+            <div className="text-xs text-gray-600">
+              Referrer earns ${referrerCut.toFixed(2)} • Vendor takes ${vendorTake.toFixed(2)}
+            </div>
+          )}
+        </div>
+
+        <textarea className="w-full border rounded p-2" placeholder="Notes"
+          value={form.notes} onChange={(e)=>setForm({...form,notes:e.target.value})}/>
+
+        <button disabled={submitting}
+          className="px-4 py-2 rounded-xl bg-black text-white disabled:opacity-50">
+          {submitting ? "Submitting..." : "Submit"}
+        </button>
+      </form>
     </div>
   );
 }
-function Th({ children }) { return <th className="text-left p-3 font-semibold">{children}</th>; }
-function Td({ children }) { return <td className="p-3 align-top">{children}</td>; }
