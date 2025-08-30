@@ -78,7 +78,6 @@ export default function ChatPage({ params }) {
 
   return (
     <div className="min-h-dvh bg-white">
-      {/* Header */}
       <div className="border-b sticky top-0 bg-white/90 backdrop-blur">
         <div className="mx-auto max-w-4xl px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -105,7 +104,6 @@ export default function ChatPage({ params }) {
         </div>
       </div>
 
-      {/* Thread */}
       <div className="mx-auto max-w-4xl px-4 py-4">
         <div ref={scrollerRef} className="h-[70vh] border rounded-2xl bg-gray-50 p-4 overflow-y-auto shadow-inner">
           {grouped.length === 0 && (
@@ -118,7 +116,6 @@ export default function ChatPage({ params }) {
           </div>
         </div>
 
-        {/* Composer */}
         <form onSubmit={sendMessage} className="mt-4 flex items-end gap-2">
           <textarea
             className="flex-1 border rounded-2xl p-3 min-h-[48px] max-h-40 resize-y focus:outline-none focus:ring-2 focus:ring-black/10"
@@ -143,29 +140,22 @@ export default function ChatPage({ params }) {
 }
 
 /* ---------- UI bits ---------- */
-
 function MessageGroup({ sender, when, items }) {
   const meta = getSenderMeta(sender);
   const align = sender === "ai" ? "items-start" : "items-end";
   const bubbleBase = "px-3 py-2 rounded-2xl shadow-sm border text-sm whitespace-pre-wrap break-words max-w-[75%]";
-
   return (
     <div className={`flex ${align} gap-3`}>
       {sender === "ai" ? <Avatar meta={meta} /> : <div className="w-8" />}
       <div className="flex flex-col gap-1">
-        <div className="text-[11px] text-gray-500">
-          {meta.label} • {formatTime(when)}
-        </div>
+        <div className="text-[11px] text-gray-500">{meta.label} • {formatTime(when)}</div>
         {items.map((m, i) => (
           <div
             key={i}
             className={`${bubbleBase} ${
-              sender === "ai"
-                ? "bg-white border-gray-200"
-                : sender === "vendor"
-                ? "bg-blue-600 text-white border-blue-700"
-                : sender === "host"
-                ? "bg-amber-600 text-white border-amber-700"
+              sender === "ai" ? "bg-white border-gray-200"
+                : sender === "vendor" ? "bg-blue-600 text-white border-blue-700"
+                : sender === "host" ? "bg-amber-600 text-white border-amber-700"
                 : "bg-emerald-600 text-white border-emerald-700"
             }`}
           >
@@ -180,7 +170,7 @@ function MessageGroup({ sender, when, items }) {
 
 function Avatar({ meta, right = false }) {
   return (
-    <div className={`w-8 h-8 rounded-xl grid place-items-center ${right ? "" : ""} ${meta.color} text-white`}>
+    <div className={`w-8 h-8 rounded-xl grid place-items-center ${meta.color} text-white`}>
       <span className="text-base" title={meta.label}>{meta.badge}</span>
     </div>
   );
@@ -193,9 +183,7 @@ function EmptyState({ onClick }) {
         <div className="text-6xl">💬</div>
         <div className="mt-2 font-semibold">Start the conversation</div>
         <div className="text-sm text-gray-600">Ask for date, headcount, budget, add-ons, rain plan, etc.</div>
-        <button onClick={onClick} className="mt-3 text-sm underline">
-          Autofill a good first message
-        </button>
+        <button onClick={onClick} className="mt-3 text-sm underline">Autofill a good first message</button>
       </div>
     </div>
   );
@@ -209,7 +197,6 @@ function getSenderMeta(sender) {
     default: return { label: "AI", badge: "🤖", color: "bg-gray-900" };
   }
 }
-
 function formatTime(d) {
   const t = new Date(d);
   return t.toLocaleString(undefined, { hour: "numeric", minute: "2-digit" });
