@@ -15,6 +15,6 @@ This repo powers the CAPITALIZE referral engine on Vercel.
 - CORS allowlist (edit `allowedOrigins`)
 - Rate limiting (100 requests / 15min per IP)
 - Request IDs for easy logging
-- Zod validation for all inputs
+- Zod validation for all inputs 
 - In-memory referral store (replace with DB later)
 <!-- redeploy -->
