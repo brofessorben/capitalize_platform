@@ -1,5 +1,6 @@
 "use client";
-import BackButton from "../components/BackButton";
+import BackButton from "../../components/BackButton";
+import ReferralForm from "../../components/ReferralForm";
 
 export default function ReferrerDash() {
   return (
@@ -8,7 +9,8 @@ export default function ReferrerDash() {
         <h1 className="text-2xl font-bold">Referrer Dashboard</h1>
         <BackButton />
       </div>
-      {/* referrer content here */}
+
+      <ReferralForm />
     </div>
   );
 }
