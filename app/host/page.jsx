@@ -1,17 +1,29 @@
 export default function HostDash() {
-  function KPI({ label, value }) {
-    return <div className="rounded-2xl border p-4"><div className="text-sm text-gray-500">{label}</div><div className="text-2xl font-bold">{value}</div></div>;
-  }
-
   return (
-    <div className="p-6 space-y-6 bg-white rounded-lg shadow-sm">
-      <h1 className="text-2xl font-bold text-blue-800">Host Dashboard Overview</h1>
-      <div className="flex flex-col md:flex-row gap-6">
-        <div className="flex-1 bg-white p-5 rounded-lg border-l-4 border-green-500"><p className="text-lg text-gray-700">Pending Requests</p><p className="text-2xl font-bold text-green-600">2</p></div>
-        <div className="flex-1 bg-white p-5 rounded-lg border-l-4 border-yellow-500"><p className="text-lg text-gray-700">Proposals in Review</p><p className="text-2xl font-bold text-yellow-600">1</p></div>
-        <div className="flex-1 bg-white p-5 rounded-lg border-l-4 border-purple-500"><p className="text-lg text-gray-700">Confirmed Bookings</p><p className="text-2xl font-bold text-purple-600">1</p></div>
-        <div className="flex-1 bg-white p-5 rounded-lg border-l-4 border-red-500"><p className="text-lg text-gray-700">Earned Rewards</p><p className="text-2xl font-bold text-red-600">$50.00</p></div>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Host Dashboard</h1>
+        <a
+          href="/chat/demo-123"
+          className="px-4 py-2 rounded-xl bg-amber-600 text-white hover:opacity-90"
+        >
+          Message Vendor (demo)
+        </a>
       </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-2xl border p-4">Open Requests: 0</div>
+        <div className="rounded-2xl border p-4">Proposals Received: 0</div>
+        <div className="rounded-2xl border p-4">Booked: 0</div>
+        <div className="rounded-2xl border p-4">Rewards: $0.00</div>
+      </div>
+
+      <section className="space-y-3">
+        <h2 className="font-semibold">Your Events</h2>
+        <div className="rounded-2xl border p-4 text-sm text-gray-600 bg-white">
+          Create events (soon): choose date/time, headcount, and needs. Vendors apply or get matched.
+        </div>
+      </section>
     </div>
   );
 }
