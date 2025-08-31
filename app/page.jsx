@@ -3,103 +3,158 @@ import Link from "next/link";
 
 export default function LandingPage() {
   return (
-    <main className="min-h-dvh text-gray-100 flex flex-col relative overflow-hidden">
-      {/* Animated cosmic background */}
-      <div className="absolute inset-0 bg-black">
-        <div className="stars" />
-        <div className="twinkling" />
-        <div className="milkyway" />
+    <main className="relative min-h-dvh overflow-hidden bg-black text-white">
+      {/* Background universe layers */}
+      <div className="universe pointer-events-none">
+        {/* deep starfield */}
+        <div className="stars stars--far" />
+        {/* nearer starfield with twinkle */}
+        <div className="stars stars--near" />
+        {/* soft galactic glow */}
+        <div className="galaxy-glow" />
+        {/* the “Milky Way” texture, huge and slowly rotating */}
+        <div className="galaxy-core" />
       </div>
 
-      {/* HEADER */}
-      <header className="sticky top-0 z-40 bg-black/70 backdrop-blur border-b border-gray-800">
-        <div className="mx-auto max-w-7xl px-6 h-16 flex items-center justify-between">
-          <Link href="/" className="font-black tracking-tight text-xl text-white">
-            CAPITALIZE
-          </Link>
-          <nav className="hidden md:flex items-center gap-6 text-sm">
-            <a href="#how" className="hover:text-purple-300">How it Works</a>
-            <a href="#roles" className="hover:text-purple-300">Roles</a>
-            <a href="#features" className="hover:text-purple-300">Features</a>
-            <a href="#faq" className="hover:text-purple-300">FAQ</a>
-          </nav>
+      {/* Foreground content */}
+      <section className="relative z-10 mx-auto max-w-4xl px-6 py-28">
+        <h1 className="text-5xl md:text-6xl font-extrabold tracking-tight">
+          CAPITALIZE
+        </h1>
+        <p className="mt-4 text-lg text-white/80 max-w-2xl">
+          Connect. Refer. Get Paid.
+        </p>
+
+        <div className="mt-8 flex gap-4">
           <Link
             href="/referrer"
-            className="px-4 py-2 rounded-xl border border-purple-400 bg-purple-600 hover:bg-purple-500 hover:text-white transition"
+            className="rounded-2xl bg-white text-black px-5 py-3 text-sm font-semibold hover:bg-white/90"
           >
-            Start Referring
+            Referrer
           </Link>
-        </div>
-      </header>
-
-      {/* HERO */}
-      <section className="flex-1 flex items-center justify-center relative z-10">
-        <div className="mx-auto max-w-4xl px-6 py-20 text-center">
-          <h1 className="text-6xl font-extrabold bg-gradient-to-r from-purple-400 via-pink-500 to-yellow-400 bg-clip-text text-transparent animate-pulse">
-            Connect. Refer. Get Paid.
-          </h1>
-          <p className="mt-6 text-lg text-gray-300 max-w-xl mx-auto">
-            CAPITALIZE is the reverse-Amazon powered by people. Spot a host who needs a
-            vendor, drop the lead, and our AI handles the rest — proposals, chat, and instant payouts.
-          </p>
-          <div className="mt-8 flex justify-center gap-4">
-            <Link href="/referrer" className="px-6 py-3 rounded-2xl bg-purple-600 text-white hover:bg-purple-500">
-              Start Referring
-            </Link>
-            <a href="#features" className="px-6 py-3 rounded-2xl border border-purple-400 hover:bg-purple-600 hover:text-white">
-              Explore Features
-            </a>
-          </div>
+          <Link
+            href="/vendor"
+            className="rounded-2xl border border-white/20 px-5 py-3 text-sm font-semibold hover:bg-white/10"
+          >
+            Vendor
+          </Link>
+          <Link
+            href="/host"
+            className="rounded-2xl border border-white/20 px-5 py-3 text-sm font-semibold hover:bg-white/10"
+          >
+            Host
+          </Link>
         </div>
       </section>
 
-      {/* FOOTER */}
-      <footer className="border-t border-gray-700 relative z-10">
-        <div className="mx-auto max-w-7xl px-6 py-10 flex justify-between text-sm text-gray-400">
-          <div className="font-semibold">CAPITALIZE</div>
-          <div>Freedom • Joy • Growth</div>
-          <div>© {new Date().getFullYear()} CAPITALIZE</div>
-        </div>
-      </footer>
-
-      {/* Styles */}
+      {/* Page-local styles */}
       <style jsx global>{`
-        .stars, .twinkling, .milkyway {
-          position: absolute; inset: 0; width: 100%; height: 100%;
+        /* --- Keyframes --- */
+        @keyframes drift {
+          0% { transform: translate3d(0, 0, 0) }
+          50% { transform: translate3d(2%, -2%, 0) }
+          100% { transform: translate3d(0, 0, 0) }
+        }
+        @keyframes rotate-slow {
+          0% { transform: rotate(0deg) }
+          100% { transform: rotate(360deg) }
+        }
+        @keyframes twinkle {
+          0%, 100% { opacity: 0.65 }
+          50% { opacity: 1 }
         }
 
-        /* Starfield */
-        .stars {
-          background: url("https://www.transparenttextures.com/patterns/stardust.png") repeat;
-          opacity: 0.8;
+        /* --- Universe container --- */
+        .universe {
+          position: absolute;
+          inset: 0;
+          overflow: hidden;
           z-index: 0;
         }
 
-        /* Slow star drift */
-        .twinkling {
-          background: transparent url("https://www.transparenttextures.com/patterns/stardust.png") repeat;
-          animation: move-twink 200s linear infinite;
-          z-index: 1;
-          opacity: 0.35;
+        /* --- Starfields (no images, just gradients) --- */
+        .stars {
+          position: absolute;
+          inset: -10vmin;
+          background-repeat: repeat;
+          animation: drift 32s ease-in-out infinite;
+          opacity: 0.9;
+          filter: drop-shadow(0 0 1px #fff);
+        }
+        /* far layer: tiny/soft stars */
+        .stars--far {
+          background-image:
+            radial-gradient(1px 1px at 10% 20%, rgba(255,255,255,.7) 80%, transparent 81%),
+            radial-gradient(1px 1px at 30% 80%, rgba(255,255,255,.7) 80%, transparent 81%),
+            radial-gradient(1px 1px at 50% 40%, rgba(255,255,255,.7) 80%, transparent 81%),
+            radial-gradient(1px 1px at 70% 10%, rgba(255,255,255,.7) 80%, transparent 81%),
+            radial-gradient(1px 1px at 90% 70%, rgba(255,255,255,.7) 80%, transparent 81%),
+            radial-gradient(1px 1px at 80% 30%, rgba(255,255,255,.7) 80%, transparent 81%),
+            radial-gradient(1px 1px at 15% 60%, rgba(255,255,255,.7) 80%, transparent 81%);
+          background-size: 200px 200px;
+          transform: scale(1.1);
+          opacity: 0.6;
+          animation-duration: 60s;
+        }
+        /* near layer: denser stars with subtle twinkle */
+        .stars--near {
+          background-image:
+            radial-gradient(1.2px 1.2px at 12% 25%, rgba(255,255,255,.9) 80%, transparent 81%),
+            radial-gradient(1.2px 1.2px at 44% 66%, rgba(255,255,255,.9) 80%, transparent 81%),
+            radial-gradient(1.2px 1.2px at 78% 18%, rgba(255,255,255,.9) 80%, transparent 81%),
+            radial-gradient(1.2px 1.2px at 6% 88%, rgba(255,255,255,.9) 80%, transparent 81%),
+            radial-gradient(1.2px 1.2px at 88% 82%, rgba(255,255,255,.9) 80%, transparent 81%),
+            radial-gradient(1.2px 1.2px at 62% 12%, rgba(255,255,255,.9) 80%, transparent 81%),
+            radial-gradient(1.2px 1.2px at 32% 8%, rgba(255,255,255,.9) 80%, transparent 81%),
+            radial-gradient(1.2px 1.2px at 20% 74%, rgba(255,255,255,.9) 80%, transparent 81%),
+            radial-gradient(1.2px 1.2px at 70% 54%, rgba(255,255,255,.9) 80%, transparent 81%);
+          background-size: 180px 180px;
+          animation: drift 40s ease-in-out infinite, twinkle 3.8s ease-in-out infinite;
+          opacity: 0.9;
           mix-blend-mode: screen;
         }
 
-        /* Milky Way galaxy image */
-        .milkyway {
-          background: url("https://upload.wikimedia.org/wikipedia/commons/9/95/Milky_Way_Galaxy.jpg") center/cover no-repeat;
-          z-index: 2;
-          opacity: 0.45;
-          animation: pulse 10s ease-in-out infinite;
+        /* --- Soft purple/blue galactic glow behind the core --- */
+        .galaxy-glow {
+          position: absolute;
+          inset: -20vmin;
+          background:
+            radial-gradient(60vmin 40vmin at 60% 45%, rgba(120, 84, 255, 0.22), transparent 55%),
+            radial-gradient(80vmin 56vmin at 40% 55%, rgba(40, 180, 255, 0.16), transparent 60%),
+            radial-gradient(120vmin 90vmin at 50% 50%, rgba(110, 0, 160, 0.10), transparent 62%);
+          filter: blur(14px) saturate(120%);
+          animation: drift 50s ease-in-out infinite;
         }
 
-        @keyframes move-twink {
-          from { background-position: 0 0; }
-          to   { background-position: -10000px 5000px; }
+        /* --- Milky Way “core” (big image, masked + animated) --- */
+        .galaxy-core {
+          position: absolute;
+          left: 50%;
+          top: 50%;
+          width: 160vmin;   /* huge so it fills most screens */
+          height: 160vmin;
+          transform: translate(-50%, -50%);
+          /* use multiple backgrounds: texture + subtle noise to break banding */
+          background-image:
+            url("https://images.unsplash.com/photo-1475274222565-3e77c57eacb6?auto=format&fit=crop&w=2000&q=80"),
+            radial-gradient(50% 50% at 50% 50%, rgba(255,255,255,.05), rgba(0,0,0,.0));
+          background-size: cover, 120% 120%;
+          background-position: center, center;
+          opacity: 0.75;
+          mix-blend-mode: screen;
+
+          /* fade the edges so it looks like a galaxy, not a hard square */
+          -webkit-mask-image: radial-gradient(60% 45% at 50% 50%, black 55%, transparent 75%);
+          mask-image: radial-gradient(60% 45% at 50% 50%, black 55%, transparent 75%);
+
+          /* gentle rotation + micro drift for life */
+          animation: rotate-slow 180s linear infinite, drift 90s ease-in-out infinite;
+          will-change: transform;
         }
 
-        @keyframes pulse {
-          0%, 100% { opacity: 0.35; }
-          50%      { opacity: 0.55; }
+        /* Accessibility: prefer-reduced-motion users get a static sky */
+        @media (prefers-reduced-motion: reduce) {
+          .stars, .galaxy-glow, .galaxy-core { animation: none !important; }
         }
       `}</style>
     </main>
