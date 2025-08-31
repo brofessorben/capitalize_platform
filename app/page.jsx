@@ -48,9 +48,11 @@ export default function LandingPage() {
           50% { transform: translate3d(2%, -2%, 0) }
           100% { transform: translate3d(0, 0, 0) }
         }
-        @keyframes twinkle {
-          0%, 100% { opacity: 0.65 }
-          50% { opacity: 1 }
+        @keyframes sparkle {
+          0% { opacity: 0.6; filter: drop-shadow(0 0 2px #f00); background-color: #f00; }
+          33% { opacity: 1; filter: drop-shadow(0 0 3px #fff); background-color: #fff; }
+          66% { opacity: 0.8; filter: drop-shadow(0 0 3px #00f); background-color: #00f; }
+          100% { opacity: 0.6; filter: drop-shadow(0 0 2px #f00); background-color: #f00; }
         }
 
         .universe {
@@ -65,26 +67,37 @@ export default function LandingPage() {
           inset: -10vmin;
           background-repeat: repeat;
           animation: drift 32s ease-in-out infinite;
-          filter: drop-shadow(0 0 1px #fff);
         }
-        .stars--far {
-          background-image:
-            radial-gradient(1px 1px at 10% 20%, rgba(255,255,255,.7) 80%, transparent 81%),
-            radial-gradient(1px 1px at 30% 80%, rgba(255,255,255,.7) 80%, transparent 81%),
-            radial-gradient(1px 1px at 50% 40%, rgba(255,255,255,.7) 80%, transparent 81%);
-          background-size: 200px 200px;
-          transform: scale(1.1);
-          opacity: 0.6;
-          animation-duration: 60s;
-        }
+
+        .stars--far,
         .stars--near {
           background-image:
-            radial-gradient(1.2px 1.2px at 12% 25%, rgba(255,255,255,.9) 80%, transparent 81%),
-            radial-gradient(1.2px 1.2px at 44% 66%, rgba(255,255,255,.9) 80%, transparent 81%),
-            radial-gradient(1.2px 1.2px at 78% 18%, rgba(255,255,255,.9) 80%, transparent 81%);
+            radial-gradient(1px 1px at 10% 20%, white 100%, transparent 0),
+            radial-gradient(1px 1px at 30% 80%, white 100%, transparent 0),
+            radial-gradient(1px 1px at 50% 40%, white 100%, transparent 0),
+            radial-gradient(1px 1px at 70% 60%, white 100%, transparent 0),
+            radial-gradient(1px 1px at 90% 10%, white 100%, transparent 0);
+          background-size: 200px 200px;
+          animation: drift 60s ease-in-out infinite;
+        }
+
+        .stars--near {
           background-size: 180px 180px;
-          animation: drift 40s ease-in-out infinite, twinkle 3.8s ease-in-out infinite;
-          opacity: 0.9;
+          animation: drift 40s ease-in-out infinite;
+        }
+
+        /* Overlay actual twinkling sparkles */
+        .stars--far::before,
+        .stars--near::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background-image:
+            radial-gradient(1.5px 1.5px at 20% 30%, red 100%, transparent 0),
+            radial-gradient(1.5px 1.5px at 60% 50%, white 100%, transparent 0),
+            radial-gradient(1.5px 1.5px at 80% 70%, blue 100%, transparent 0);
+          background-size: 200px 200px;
+          animation: sparkle 4s linear infinite;
           mix-blend-mode: screen;
         }
 
