@@ -6,8 +6,7 @@ export default function LandingPage() {
     <main className="relative min-h-dvh overflow-hidden bg-black text-white">
       {/* Background universe layers */}
       <div className="universe pointer-events-none">
-        <div className="stars stars--far" />
-        <div className="stars stars--near" />
+        <div className="stars" />
         <div className="galaxy-glow" />
       </div>
 
@@ -43,16 +42,11 @@ export default function LandingPage() {
       </section>
 
       <style jsx global>{`
-        @keyframes drift {
-          0% { transform: translate3d(0, 0, 0) }
-          50% { transform: translate3d(2%, -2%, 0) }
-          100% { transform: translate3d(0, 0, 0) }
-        }
         @keyframes sparkle {
-          0% { opacity: 0.6; filter: drop-shadow(0 0 2px #f00); background-color: #f00; }
-          33% { opacity: 1; filter: drop-shadow(0 0 3px #fff); background-color: #fff; }
-          66% { opacity: 0.8; filter: drop-shadow(0 0 3px #00f); background-color: #00f; }
-          100% { opacity: 0.6; filter: drop-shadow(0 0 2px #f00); background-color: #f00; }
+          0%   { background-color: #f00; opacity: 0.8; }
+          33%  { background-color: #fff; opacity: 1; }
+          66%  { background-color: #00f; opacity: 0.9; }
+          100% { background-color: #f00; opacity: 0.8; }
         }
 
         .universe {
@@ -64,41 +58,23 @@ export default function LandingPage() {
 
         .stars {
           position: absolute;
-          inset: -10vmin;
-          background-repeat: repeat;
-          animation: drift 32s ease-in-out infinite;
+          inset: 0;
+          background: transparent;
         }
 
-        .stars--far,
-        .stars--near {
-          background-image:
-            radial-gradient(1px 1px at 10% 20%, white 100%, transparent 0),
-            radial-gradient(1px 1px at 30% 80%, white 100%, transparent 0),
-            radial-gradient(1px 1px at 50% 40%, white 100%, transparent 0),
-            radial-gradient(1px 1px at 70% 60%, white 100%, transparent 0),
-            radial-gradient(1px 1px at 90% 10%, white 100%, transparent 0);
-          background-size: 200px 200px;
-          animation: drift 60s ease-in-out infinite;
-        }
-
-        .stars--near {
-          background-size: 180px 180px;
-          animation: drift 40s ease-in-out infinite;
-        }
-
-        /* Overlay actual twinkling sparkles */
-        .stars--far::before,
-        .stars--near::before {
+        /* generate twinkling stars */
+        .stars::before {
           content: "";
           position: absolute;
           inset: 0;
-          background-image:
-            radial-gradient(1.5px 1.5px at 20% 30%, red 100%, transparent 0),
-            radial-gradient(1.5px 1.5px at 60% 50%, white 100%, transparent 0),
-            radial-gradient(1.5px 1.5px at 80% 70%, blue 100%, transparent 0);
+          background-image: 
+            radial-gradient(2px 2px at 20% 30%, white 100%, transparent 0),
+            radial-gradient(2px 2px at 60% 50%, white 100%, transparent 0),
+            radial-gradient(2px 2px at 80% 70%, white 100%, transparent 0),
+            radial-gradient(2px 2px at 40% 80%, white 100%, transparent 0),
+            radial-gradient(2px 2px at 70% 20%, white 100%, transparent 0);
           background-size: 200px 200px;
-          animation: sparkle 4s linear infinite;
-          mix-blend-mode: screen;
+          animation: sparkle 3s infinite alternate;
         }
 
         .galaxy-glow {
@@ -108,11 +84,6 @@ export default function LandingPage() {
             radial-gradient(60vmin 40vmin at 60% 45%, rgba(120, 84, 255, 0.22), transparent 55%),
             radial-gradient(80vmin 56vmin at 40% 55%, rgba(40, 180, 255, 0.16), transparent 60%);
           filter: blur(14px) saturate(120%);
-          animation: drift 50s ease-in-out infinite;
-        }
-
-        @media (prefers-reduced-motion: reduce) {
-          .stars, .galaxy-glow { animation: none !important; }
         }
       `}</style>
     </main>
