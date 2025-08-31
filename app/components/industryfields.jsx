@@ -15,7 +15,7 @@ export const FIELDS_BY_INDUSTRY = {
   catering: [
     { key: "event_type", label: "Event Type", type: "select", options: ["Wedding", "Corporate Lunch", "Birthday", "Graduation", "Festival", "Other"] },
     { key: "headcount", label: "Headcount (optional)", type: "number" },
-    { key: "price_per_person", label: "Price per person (optional)", type: "number", step: "0.01" },
+    { key: "price_per_person", label: "Price per Person (optional)", type: "number", step: "0.01" },
   ],
   real_estate: [
     { key: "property_address", label: "Property Address", type: "text", required: true },
@@ -57,33 +57,34 @@ export const FIELDS_BY_INDUSTRY = {
 export default function IndustryFields({ industry, form, setVal }) {
   const fields = FIELDS_BY_INDUSTRY[industry] || [];
   return (
-    <div className="grid md:grid-cols-2 gap-3">
-      {fields.map((f) =>
-        f.type === "select" ? (
-          <select
-            key={f.key}
-            className="border rounded p-2"
-            value={form[f.key] ?? (f.options?.[0] || "")}
-            onChange={(e) => setVal(f.key, e.target.value)}
-            required={!!f.required}
-          >
-            {(f.options || []).map((opt) => (
-              <option key={opt} value={opt}>{opt}</option>
-            ))}
-          </select>
-        ) : (
-          <input
-            key={f.key}
-            className="border rounded p-2"
-            type={f.type}
-            step={f.step}
-            placeholder={f.label}
-            value={form[f.key] ?? ""}
-            onChange={(e) => setVal(f.key, e.target.value)}
-            required={!!f.required}
-          />
-        )
-      )}
+    <div className="flex flex-col gap-4 p-4 bg-gray-50 rounded-md">
+      {fields.map((f) => (
+        <div key={f.key} className="w-full">
+          {f.type === "select" ? (
+            <select
+              className="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              value={form[f.key] ?? (f.options?.[0] || "")}
+              onChange={(e) => setVal(f.key, e.target.value)}
+              required={!!f.required}
+            >
+              {(f.options || []).map((opt) => (
+                <option key={opt} value={opt}>{opt}</option>
+              ))}
+            </select>
+          ) : (
+            <input
+              className="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              type={f.type}
+              step={f.step}
+              placeholder={f.label}
+              value={form[f.key] ?? ""}
+              onChange={(e) => setVal(f.key, e.target.value)}
+              required={!!f.required}
+            />
+          )}
+          <label className="block text-sm text-gray-500 mt-1">{f.label} {f.required && <span className="text-red-500">*</span>}</label>
+        </div>
+      ))}
     </div>
   );
 }
