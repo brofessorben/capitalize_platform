@@ -1,5 +1,5 @@
-// Minimal chat API — works even without OpenAI key.
-// If OPENAI_API_KEY is set, it will use it; otherwise it echoes a helpful reply.
+// pages/api/chat.js
+import { createClient } from "@supabase/supabase-js";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -7,34 +7,43 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
+  const { lead_id, sender = "vendor", text = "" } = req.body || {};
+  if (!lead_id || !text) {
+    return res.status(400).json({ error: "lead_id and text required" });
+  }
+
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE_KEY
+  );
+
   try {
-    const { lead_id, sender, text } = req.body || {};
-    if (!text) return res.status(400).json({ error: "Missing text" });
+    // store the user's message
+    await supabase.from("messages").insert({
+      lead_id,
+      sender,
+      role: "user",
+      text,
+    });
 
-    // Default fallback reply (no key needed)
-    let reply = `Got it. For lead "${lead_id}", from ${sender}: “${text}”. Next step: ask date, headcount, budget, and timeline.`;
+    // simple placeholder reply (no OpenAI call, keeps build simple)
+    const reply = `Got it from ${sender}: "${text}"`;
 
-    // If you have an OpenAI key, we'll use it for a smarter reply
-    if (process.env.OPENAI_API_KEY) {
-      const r = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            {
-              role: "system",
-              content:
-                "You are a concise negotiator assistant for events. Give short, actionable replies to move the deal forward.",
-            },
-            {
-              role: "user",
-              content: `Sender: ${sender}\nLead: ${lead_id}\nMessage: ${text}\nReply with the next best step.`,
-            },
-          ],
+    // store AI reply
+    await supabase.from("messages").insert({
+      lead_id,
+      sender: "ai",
+      role: "assistant",
+      text: reply,
+    });
+
+    return res.status(200).json({ ok: true, reply });
+  } catch (err) {
+    return res
+      .status(500)
+      .json({ error: "Chat error", details: String(err?.message || err) });
+  }
+}          ],
           max_tokens: 160,
           temperature: 0.6,
         }),
