@@ -43,7 +43,6 @@ export default function ReferralForm() {
     e.preventDefault();
     setSubmitting(true);
     try {
-      // Build a compact note from fields
       const parts = [];
       parts.push(INDUSTRIES.find((i) => i.id === industry)?.label || industry);
       for (const f of fields) {
@@ -54,7 +53,6 @@ export default function ReferralForm() {
       if (form.price_per_person) parts.push(`$${Number(form.price_per_person).toFixed(2)}/pp`);
       if (form.notes) parts.push(`Notes: ${form.notes}`);
 
-      // 1) create lead
       const leadResp = await fetchJSON("/api/leads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -67,7 +65,6 @@ export default function ReferralForm() {
       });
       const lead = leadResp.lead;
 
-      // 2) create proposal (optional pricing)
       const terms = {
         industry,
         fields: Object.fromEntries(fields.map((f) => [f.key, form[f.key] ?? null])),
@@ -88,10 +85,6 @@ export default function ReferralForm() {
       });
 
       alert("Lead + Proposal created!");
-      // Optional: jump into chat
-      // window.location.href = `/chat/${lead.id}`;
-
-      // Reset some fields
       setForm((f) => ({
         ...f,
         host: "",
@@ -107,56 +100,75 @@ export default function ReferralForm() {
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-4 max-w-2xl border rounded-2xl p-5 bg-white">
-      {/* Top line */}
-      <div className="grid md:grid-cols-3 gap-3">
-        <input className="border rounded p-2" placeholder="Host (e.g., Anna)" value={form.host} onChange={(e) => setVal("host", e.target.value)} required />
-        <input className="border rounded p-2" placeholder="Vendor" value={form.vendor} onChange={(e) => setVal("vendor", e.target.value)} />
-        <input className="border rounded p-2" placeholder="Your name (referrer)" value={form.referrer} onChange={(e) => setVal("referrer", e.target.value)} />
+    <form onSubmit={onSubmit} className="p-6 bg-white rounded-lg shadow-md space-y-6 max-w-2xl">
+      <div className="space-y-4">
+        <h2 className="text-xl font-semibold text-gray-800">Referral Details</h2>
+        <div className="flex flex-col gap-4">
+          <input
+            className="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            placeholder="Host (e.g., Anna)"
+            value={form.host}
+            onChange={(e) => setVal("host", e.target.value)}
+            required
+          />
+          <input
+            className="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            placeholder="Vendor"
+            value={form.vendor}
+            onChange={(e) => setVal("vendor", e.target.value)}
+          />
+          <input
+            className="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            placeholder="Your name (referrer)"
+            value={form.referrer}
+            onChange={(e) => setVal("referrer", e.target.value)}
+          />
+        </div>
       </div>
 
-      {/* Industry */}
-      <div className="grid md:grid-cols-2 gap-3">
-        <label className="text-sm font-semibold">Industry</label>
-        <select className="border rounded p-2" value={industry} onChange={(e) => setIndustry(e.target.value)}>
+      <div className="space-y-4">
+        <label className="text-sm font-semibold text-gray-700">Industry</label>
+        <select
+          className="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          value={industry}
+          onChange={(e) => setIndustry(e.target.value)}
+        >
           {INDUSTRIES.map((i) => (
             <option key={i.id} value={i.id}>{i.label}</option>
           ))}
         </select>
       </div>
 
-      {/* Dynamic fields */}
-      <IndustryFields industry={industry} form={form} setVal={setVal} />
+      <div className="space-y-4">
+        <h3 className="text-lg font-medium text-gray-700">Industry-Specific Fields</h3>
+        <IndustryFields industry={industry} form={form} setVal={setVal} />
+      </div>
 
-      {/* Optional classic pricing visible for any industry */}
-      <div className="grid md:grid-cols-2 gap-3 items-end">
-        <input
-          className="border rounded p-2"
-          type="number"
-          placeholder="Headcount (optional)"
-          value={form.headcount}
-          onChange={(e) => setVal("headcount", e.target.value)}
-        />
-        <div className="grid grid-cols-2 gap-3 items-end">
-          <label className="text-sm">
-            Price per person (optional)
-            <input
-              type="number"
-              step="0.01"
-              className="w-full border rounded p-2 mt-1"
-              value={form.price_per_person}
-              onChange={(e) => setVal("price_per_person", e.target.value)}
-            />
-          </label>
-          <div className="text-right font-semibold">
+      <div className="space-y-4">
+        <div className="flex flex-col gap-2">
+          <input
+            className="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            type="number"
+            placeholder="Headcount (optional)"
+            value={form.headcount}
+            onChange={(e) => setVal("headcount", e.target.value)}
+          />
+          <input
+            className="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            type="number"
+            step="0.01"
+            placeholder="Price per Person (optional)"
+            value={form.price_per_person}
+            onChange={(e) => setVal("price_per_person", e.target.value)}
+          />
+          <div className="text-right font-semibold text-gray-800">
             {subtotal > 0 ? `Subtotal: $${subtotal.toFixed(2)}` : `Subtotal: —`}
           </div>
         </div>
       </div>
 
-      {/* Fee slider */}
-      <div>
-        <label className="text-sm font-semibold">Referral Fee: {form.referrer_fee_pct}%</label>
+      <div className="space-y-2">
+        <label className="text-sm font-semibold text-gray-700">Referral Fee: {form.referrer_fee_pct}%</label>
         <input
           type="range"
           min="5"
@@ -167,14 +179,23 @@ export default function ReferralForm() {
         />
         {subtotal > 0 && (
           <div className="text-xs text-gray-600">
-            Referrer earns ${referrerCut.toFixed(2)} • Vendor takes ${vendorTake.toFixed(2)}
+            Referrer earns: ${referrerCut.toFixed(2)} • Vendor takes: ${vendorTake.toFixed(2)}
           </div>
         )}
       </div>
 
-      <textarea className="w-full border rounded p-2" placeholder="Notes" value={form.notes} onChange={(e) => setVal("notes", e.target.value)} />
+      <textarea
+        className="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        placeholder="Notes"
+        value={form.notes}
+        onChange={(e) => setVal("notes", e.target.value)}
+      />
 
-      <button disabled={submitting} className="px-4 py-2 rounded-xl bg-black text-white disabled:opacity-50">
+      <button
+        disabled={submitting}
+        className="w-full px-4 py-2 rounded-xl bg-black text-white disabled:opacity-50 hover:bg-gray-800 transition-colors"
+        type="submit"
+      >
         {submitting ? "Submitting…" : "Submit"}
       </button>
     </form>
