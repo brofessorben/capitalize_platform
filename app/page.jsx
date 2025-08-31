@@ -3,87 +3,100 @@ import Link from "next/link";
 
 export default function LandingPage() {
   return (
-    <main className="relative min-h-dvh overflow-hidden bg-black text-white">
-      {/* Background universe layers */}
-      <div className="universe pointer-events-none">
-        <div className="stars" />
-        <div className="galaxy-glow" />
+    <main className="min-h-dvh text-gray-100 flex flex-col relative overflow-hidden">
+      {/* Animated stars background */}
+      <div className="absolute inset-0 bg-black">
+        <div className="stars"></div>
+        <div className="twinkling"></div>
+        <div className="galaxy-glow"></div>
       </div>
 
-      {/* Foreground content */}
-      <section className="relative z-10 mx-auto max-w-4xl px-6 py-28">
-        <h1 className="text-5xl md:text-6xl font-extrabold tracking-tight">
-          CAPITALIZE
-        </h1>
-        <p className="mt-4 text-lg text-white/80 max-w-2xl">
-          Connect. Refer. Get Paid.
-        </p>
-
-        <div className="mt-8 flex gap-4">
+      {/* HEADER */}
+      <header className="sticky top-0 z-40 bg-black/70 backdrop-blur border-b border-gray-800">
+        <div className="mx-auto max-w-7xl px-6 h-16 flex items-center justify-between">
+          <Link href="/" className="font-black tracking-tight text-xl text-white">
+            CAPITALIZE
+          </Link>
+          <nav className="hidden md:flex items-center gap-6 text-sm">
+            <a href="#how" className="hover:text-purple-300">How it Works</a>
+            <a href="#roles" className="hover:text-purple-300">Roles</a>
+            <a href="#features" className="hover:text-purple-300">Features</a>
+            <a href="#faq" className="hover:text-purple-300">FAQ</a>
+          </nav>
           <Link
             href="/referrer"
-            className="rounded-2xl bg-white text-black px-5 py-3 text-sm font-semibold hover:bg-white/90"
+            className="px-4 py-2 rounded-xl border border-purple-400 bg-purple-600 hover:bg-purple-500 hover:text-white transition"
           >
-            Referrer
+            Start Referring
           </Link>
-          <Link
-            href="/vendor"
-            className="rounded-2xl border border-white/20 px-5 py-3 text-sm font-semibold hover:bg-white/10"
-          >
-            Vendor
-          </Link>
-          <Link
-            href="/host"
-            className="rounded-2xl border border-white/20 px-5 py-3 text-sm font-semibold hover:bg-white/10"
-          >
-            Host
-          </Link>
+        </div>
+      </header>
+
+      {/* HERO */}
+      <section className="flex-1 flex items-center justify-center relative z-10">
+        <div className="mx-auto max-w-4xl px-6 py-20 text-center">
+          <h1 className="text-6xl font-extrabold bg-gradient-to-r from-purple-400 via-pink-500 to-yellow-400 bg-clip-text text-transparent animate-pulse">
+            Connect. Refer. Get Paid.
+          </h1>
+          <p className="mt-6 text-lg text-gray-300 max-w-xl mx-auto">
+            CAPITALIZE is the reverse-Amazon powered by people. Spot a host who needs a
+            vendor, drop the lead, and our AI handles the rest — proposals, chat, and instant payouts.
+          </p>
+          <div className="mt-8 flex justify-center gap-4">
+            <Link href="/referrer" className="px-6 py-3 rounded-2xl bg-purple-600 text-white hover:bg-purple-500">
+              Start Referring
+            </Link>
+            <a href="#features" className="px-6 py-3 rounded-2xl border border-purple-400 hover:bg-purple-600 hover:text-white">
+              Explore Features
+            </a>
+          </div>
         </div>
       </section>
 
-      <style jsx global>{`
-        @keyframes sparkle {
-          0%   { background-color: #f00; opacity: 0.8; }
-          33%  { background-color: #fff; opacity: 1; }
-          66%  { background-color: #00f; opacity: 0.9; }
-          100% { background-color: #f00; opacity: 0.8; }
-        }
+      {/* FOOTER */}
+      <footer className="border-t border-gray-700 relative z-10">
+        <div className="mx-auto max-w-7xl px-6 py-10 flex justify-between text-sm text-gray-400">
+          <div className="font-semibold">CAPITALIZE</div>
+          <div>Freedom • Joy • Growth</div>
+          <div>© {new Date().getFullYear()} CAPITALIZE</div>
+        </div>
+      </footer>
 
-        .universe {
+      {/* Styles for stars and galaxy */}
+      <style jsx global>{`
+        .stars, .twinkling, .galaxy-glow {
           position: absolute;
-          inset: 0;
-          overflow: hidden;
-          z-index: 0;
+          top: 0; left: 0;
+          width: 100%; height: 100%;
+          display: block;
         }
 
         .stars {
-          position: absolute;
-          inset: 0;
-          background: transparent;
+          background: url("https://www.transparenttextures.com/patterns/stardust.png") repeat;
+          z-index: 0;
         }
 
-        /* generate twinkling stars */
-        .stars::before {
-          content: "";
-          position: absolute;
-          inset: 0;
-          background-image: 
-            radial-gradient(2px 2px at 20% 30%, white 100%, transparent 0),
-            radial-gradient(2px 2px at 60% 50%, white 100%, transparent 0),
-            radial-gradient(2px 2px at 80% 70%, white 100%, transparent 0),
-            radial-gradient(2px 2px at 40% 80%, white 100%, transparent 0),
-            radial-gradient(2px 2px at 70% 20%, white 100%, transparent 0);
-          background-size: 200px 200px;
-          animation: sparkle 3s infinite alternate;
+        .twinkling {
+          background: transparent url("https://www.transparenttextures.com/patterns/stardust.png") repeat;
+          animation: move-twink 200s linear infinite;
+          z-index: 1;
+          opacity: 0.5;
         }
 
         .galaxy-glow {
-          position: absolute;
-          inset: -20vmin;
-          background:
-            radial-gradient(60vmin 40vmin at 60% 45%, rgba(120, 84, 255, 0.22), transparent 55%),
-            radial-gradient(80vmin 56vmin at 40% 55%, rgba(40, 180, 255, 0.16), transparent 60%);
-          filter: blur(14px) saturate(120%);
+          background: radial-gradient(circle at center, rgba(128,0,128,0.5), transparent 70%);
+          z-index: 2;
+          animation: pulse 8s ease-in-out infinite;
+        }
+
+        @keyframes move-twink {
+          from {background-position: 0 0;}
+          to {background-position: -10000px 5000px;}
+        }
+
+        @keyframes pulse {
+          0%, 100% {opacity: 0.6;}
+          50% {opacity: 0.9;}
         }
       `}</style>
     </main>
