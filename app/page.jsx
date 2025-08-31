@@ -2,14 +2,40 @@
 import Link from "next/link";
 
 export default function LandingPage() {
+  // we’ll render several comets with different sizes/delays/lanes
+  const COMETS = Array.from({ length: 7 }).map((_, i) => {
+    const size = [220, 260, 300, 360, 420, 500, 560][i % 7]; // tail length (px)
+    const thickness = [3, 4, 5, 6, 7, 8, 9][i % 7];          // tail thickness (px)
+    const duration = [14, 16, 18, 20, 22, 24, 26][i % 7];    // seconds
+    const delay = i * 3;                                     // stagger
+    const top = `${8 + i * 12}%`;                            // lanes down the screen
+    return { size, thickness, duration, delay, top };
+  });
+
   return (
     <main className="min-h-dvh text-gray-100 flex flex-col relative overflow-hidden">
-      {/* Animated stars background */}
+      {/* Animated cosmic background */}
       <div className="absolute inset-0 bg-black">
-        <div className="stars"></div>
-        <div className="twinkling"></div>
-        <div className="galaxy-glow"></div>
-        <div className="comets"></div>
+        <div className="stars" />
+        <div className="twinkling" />
+        <div className="galaxy-glow" />
+        <div className="comets">
+          {COMETS.map((c, i) => (
+            <span
+              key={i}
+              className="comet"
+              style={
+                {
+                  "--len": `${c.size}px`,
+                  "--thick": `${c.thickness}px`,
+                  "--dur": `${c.duration}s`,
+                  "--delay": `${c.delay}s`,
+                  "--laneTop": c.top,
+                } as React.CSSProperties
+              }
+            />
+          ))}
+        </div>
       </div>
 
       {/* HEADER */}
@@ -63,65 +89,81 @@ export default function LandingPage() {
         </div>
       </footer>
 
-      {/* Styles for stars, galaxy, and comets */}
+      {/* Styles */}
       <style jsx global>{`
         .stars, .twinkling, .galaxy-glow, .comets {
-          position: absolute;
-          top: 0; left: 0;
-          width: 100%; height: 100%;
-          display: block;
+          position: absolute; inset: 0; width: 100%; height: 100%;
         }
 
+        /* Starfield & drift (drifts left + down) */
         .stars {
           background: url("https://www.transparenttextures.com/patterns/stardust.png") repeat;
+          opacity: 0.8;
           z-index: 0;
         }
-
         .twinkling {
           background: transparent url("https://www.transparenttextures.com/patterns/stardust.png") repeat;
           animation: move-twink 200s linear infinite;
           z-index: 1;
-          opacity: 0.5;
+          opacity: 0.35;
+          mix-blend-mode: screen;
         }
-
         .galaxy-glow {
-          background: radial-gradient(circle at center, rgba(128,0,128,0.5), transparent 70%);
-          z-index: 2;
+          background: radial-gradient(circle at 50% 40%, rgba(160,80,255,0.35), rgba(0,0,0,0) 65%),
+                      radial-gradient(circle at 70% 60%, rgba(255,120,180,0.25), rgba(0,0,0,0) 60%);
           animation: pulse 8s ease-in-out infinite;
+          z-index: 2;
         }
 
-        /* Comets */
-        .comets::before, .comets::after {
+        /* --- COMETS --- */
+        .comets { z-index: 3; pointer-events: none; }
+
+        /* Each comet starts offscreen at right, travels left+down (same direction as star drift)
+           Tail points opposite motion so it trails behind. */
+        .comet {
+          position: absolute;
+          top: var(--laneTop);
+          right: -15vw;
+          width: var(--len);
+          height: var(--thick);
+          transform: rotate(225deg); /* aiming left+down */
+          border-radius: 9999px;
+          background:
+            linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.9) 45%, #fff 60%, rgba(255,255,255,0) 100%);
+          filter: drop-shadow(0 0 10px rgba(255,255,255,0.9))
+                  drop-shadow(0 0 24px rgba(180,140,255,0.7))
+                  blur(0.2px);
+          opacity: 0.95;
+          animation: comet-fly var(--dur) linear var(--delay) infinite;
+        }
+
+        /* Bright head glow that leads, with soft bloom */
+        .comet::after {
           content: "";
           position: absolute;
-          top: -50px;
-          width: 200px;
-          height: 3px;
-          background: linear-gradient(90deg, white, rgba(255,255,255,0));
+          right: -6px;               /* head leads */
+          top: 50%;
+          transform: translateY(-50%);
+          width: calc(var(--thick) * 2.4);
+          height: calc(var(--thick) * 2.4);
           border-radius: 9999px;
-          opacity: 0.8;
-          transform: rotate(-45deg);
-          animation: comet 12s linear infinite;
+          background: radial-gradient(circle, #fff, rgba(255,255,255,0.2) 60%, transparent 70%);
+          filter: blur(1px) drop-shadow(0 0 18px rgba(255,255,255,0.85));
         }
-        .comets::after {
-          top: 20%;
-          animation-delay: 6s;
+
+        @keyframes comet-fly {
+          0%   { transform: translate(0,0) rotate(225deg); opacity: 0; }
+          5%   { opacity: 1; }
+          100% { transform: translate(-140vw, 140vh) rotate(225deg); opacity: 0; }
         }
 
         @keyframes move-twink {
-          from {background-position: 0 0;}
-          to {background-position: -10000px 5000px;}
+          from { background-position: 0 0; }
+          to   { background-position: -10000px 5000px; } /* left + down */
         }
-
         @keyframes pulse {
-          0%, 100% {opacity: 0.6;}
-          50% {opacity: 0.9;}
-        }
-
-        @keyframes comet {
-          0% {transform: translateX(0) translateY(0) rotate(-45deg); opacity: 0;}
-          10% {opacity: 1;}
-          100% {transform: translateX(120vw) translateY(120vh) rotate(-45deg); opacity: 0;}
+          0%, 100% { opacity: 0.65; }
+          50%      { opacity: 0.95; }
         }
       `}</style>
     </main>
