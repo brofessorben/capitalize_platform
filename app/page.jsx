@@ -24,15 +24,13 @@ export default function LandingPage() {
             <span
               key={i}
               className="comet"
-              style={
-                {
-                  "--len": `${c.size}px`,
-                  "--thick": `${c.thickness}px`,
-                  "--dur": `${c.duration}s`,
-                  "--delay": `${c.delay}s`,
-                  "--laneTop": c.top,
-                } as React.CSSProperties
-              }
+              style={{
+                "--len": `${c.size}px`,
+                "--thick": `${c.thickness}px`,
+                "--dur": `${c.duration}s`,
+                "--delay": `${c.delay}s`,
+                "--laneTop": c.top,
+              }}
             />
           ))}
         </div>
@@ -65,18 +63,6 @@ export default function LandingPage() {
           <h1 className="text-6xl font-extrabold bg-gradient-to-r from-purple-400 via-pink-500 to-yellow-400 bg-clip-text text-transparent animate-pulse">
             Connect. Refer. Get Paid.
           </h1>
-          <p className="mt-6 text-lg text-gray-300 max-w-xl mx-auto">
-            CAPITALIZE is the reverse-Amazon powered by people. Spot a host who needs a
-            vendor, drop the lead, and our AI handles the rest — proposals, chat, and instant payouts.
-          </p>
-          <div className="mt-8 flex justify-center gap-4">
-            <Link href="/referrer" className="px-6 py-3 rounded-2xl bg-purple-600 text-white hover:bg-purple-500">
-              Start Referring
-            </Link>
-            <a href="#features" className="px-6 py-3 rounded-2xl border border-purple-400 hover:bg-purple-600 hover:text-white">
-              Explore Features
-            </a>
-          </div>
         </div>
       </section>
 
@@ -118,8 +104,6 @@ export default function LandingPage() {
         /* --- COMETS --- */
         .comets { z-index: 3; pointer-events: none; }
 
-        /* Each comet starts offscreen at right, travels left+down (same direction as star drift)
-           Tail points opposite motion so it trails behind. */
         .comet {
           position: absolute;
           top: var(--laneTop);
@@ -137,7 +121,6 @@ export default function LandingPage() {
           animation: comet-fly var(--dur) linear var(--delay) infinite;
         }
 
-        /* Bright head glow that leads, with soft bloom */
         .comet::after {
           content: "";
           position: absolute;
