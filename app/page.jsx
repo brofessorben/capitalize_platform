@@ -9,6 +9,7 @@ export default function LandingPage() {
         <div className="stars"></div>
         <div className="twinkling"></div>
         <div className="galaxy-glow"></div>
+        <div className="comets"></div>
       </div>
 
       {/* HEADER */}
@@ -62,9 +63,9 @@ export default function LandingPage() {
         </div>
       </footer>
 
-      {/* Styles for stars and galaxy */}
+      {/* Styles for stars, galaxy, and comets */}
       <style jsx global>{`
-        .stars, .twinkling, .galaxy-glow {
+        .stars, .twinkling, .galaxy-glow, .comets {
           position: absolute;
           top: 0; left: 0;
           width: 100%; height: 100%;
@@ -89,6 +90,24 @@ export default function LandingPage() {
           animation: pulse 8s ease-in-out infinite;
         }
 
+        /* Comets */
+        .comets::before, .comets::after {
+          content: "";
+          position: absolute;
+          top: -50px;
+          width: 200px;
+          height: 3px;
+          background: linear-gradient(90deg, white, rgba(255,255,255,0));
+          border-radius: 9999px;
+          opacity: 0.8;
+          transform: rotate(-45deg);
+          animation: comet 12s linear infinite;
+        }
+        .comets::after {
+          top: 20%;
+          animation-delay: 6s;
+        }
+
         @keyframes move-twink {
           from {background-position: 0 0;}
           to {background-position: -10000px 5000px;}
@@ -97,6 +116,12 @@ export default function LandingPage() {
         @keyframes pulse {
           0%, 100% {opacity: 0.6;}
           50% {opacity: 0.9;}
+        }
+
+        @keyframes comet {
+          0% {transform: translateX(0) translateY(0) rotate(-45deg); opacity: 0;}
+          10% {opacity: 1;}
+          100% {transform: translateX(120vw) translateY(120vh) rotate(-45deg); opacity: 0;}
         }
       `}</style>
     </main>
