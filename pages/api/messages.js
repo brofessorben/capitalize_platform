@@ -8,47 +8,41 @@ const supabase = createClient(
 
 export default async function handler(req, res) {
   try {
-    switch (req.method) {
-      // GET /api/messages?lead_id=...&limit=100
-      case "GET": {
-        const { lead_id, limit } = req.query;
-        if (!lead_id) return res.status(400).json({ error: "lead_id required" });
+    if (req.method === "GET") {
+      const lead_id = String(req.query.lead_id || "");
+      const limit = Number(req.query.limit || 200);
+      if (!lead_id) return res.status(400).json({ error: "lead_id required" });
 
-        let q = supabase
-          .from("messages")
-          .select("*")
-          .eq("lead_id", String(lead_id))
-          .order("created_at", { ascending: true });
+      const { data, error } = await supabase
+        .from("messages")
+        .select("*")
+        .eq("lead_id", lead_id)
+        .order("created_at", { ascending: true })
+        .limit(limit);
 
-        if (limit) q = q.limit(Number(limit));
-
-        const { data, error } = await q;
-        if (error) return res.status(400).json({ error: error.message });
-        return res.status(200).json({ messages: data || [] });
-      }
-
-      // POST /api/messages  { lead_id, sender, text }
-      // (optional helper for user-sent messages without AI reply)
-      case "POST": {
-        const { lead_id, sender = "vendor", text, role = "user" } = req.body || {};
-        if (!lead_id || !text) {
-          return res.status(400).json({ error: "lead_id and text required" });
-        }
-        const { data, error } = await supabase
-          .from("messages")
-          .insert([{ lead_id, sender, role, text }])
-          .select("*")
-          .single();
-
-        if (error) return res.status(400).json({ error: error.message });
-        return res.status(200).json({ message: data });
-      }
-
-      default:
-        res.setHeader("Allow", "GET, POST");
-        return res.status(405).json({ error: "Method not allowed" });
+      if (error) throw error;
+      return res.status(200).json({ ok: true, messages: data ?? [] });
     }
-  } catch (e) {
-    return res.status(500).json({ error: e?.message || "Server error" });
+
+    if (req.method === "POST") {
+      const { lead_id, sender, role = "user", text } = req.body || {};
+      if (!lead_id || !sender || !text) {
+        return res.status(400).json({ error: "lead_id, sender, text required" });
+      }
+
+      const { data, error } = await supabase
+        .from("messages")
+        .insert([{ lead_id, sender, role, text }])
+        .select()
+        .single();
+
+      if (error) throw error;
+      return res.status(200).json({ ok: true, message: data });
+    }
+
+    res.setHeader("Allow", "GET, POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  } catch (err) {
+    return res.status(500).json({ error: "messages endpoint error", details: String(err?.message || err) });
   }
 }
