@@ -1,40 +1,54 @@
-import { createClient } from "@supabase/supabase-js";
-import OpenAI from "openai";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Minimal chat API — works even without OpenAI key.
+// If OPENAI_API_KEY is set, it will use it; otherwise it echoes a helpful reply.
 
 export default async function handler(req, res) {
-  // Check if the request method is POST
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // Extract and validate request body
-  const { lead_id, sender = "vendor", text } = req.body || {};
-  if (!lead_id || !text) {
-    return res.status(400).json({ error: "lead_id and text are required" });
-  }
-
   try {
-    // Save the user's message to Supabase
-    const { error: insertError } = await supabase
-      .from("messages")
-      .insert([{ lead_id, sender, role: "user", text }]);
-    if (insertError) throw new Error(insertError.message);
+    const { lead_id, sender, text } = req.body || {};
+    if (!text) return res.status(400).json({ error: "Missing text" });
 
-    // Fetch message history for the lead
-    const { data: history, error: historyError } = await supabase
-      .from("messages")
-      .select("*")
-      .eq("lead_id", lead_id)
+    // Default fallback reply (no key needed)
+    let reply = `Got it. For lead "${lead_id}", from ${sender}: “${text}”. Next step: ask date, headcount, budget, and timeline.`;
+
+    // If you have an OpenAI key, we'll use it for a smarter reply
+    if (process.env.OPENAI_API_KEY) {
+      const r = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are a concise negotiator assistant for events. Give short, actionable replies to move the deal forward.",
+            },
+            {
+              role: "user",
+              content: `Sender: ${sender}\nLead: ${lead_id}\nMessage: ${text}\nReply with the next best step.`,
+            },
+          ],
+          max_tokens: 160,
+          temperature: 0.6,
+        }),
+      });
+
+      const j = await r.json();
+      reply = j?.choices?.[0]?.message?.content?.trim() || reply;
+    }
+
+    return res.status(200).json({ reply });
+  } catch (err) {
+    return res.status(500).json({ error: "Chat error", details: String(err?.message || err) });
+  }
+}      .eq("lead_id", lead_id)
       .order("created_at", { ascending: true });
     if (historyError) throw new Error(historyError.message);
 
