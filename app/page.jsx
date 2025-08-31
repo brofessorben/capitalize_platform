@@ -42,21 +42,14 @@ export default function LandingPage() {
             CAPITALIZE is the reverse-Amazon powered by people. Spot a host who needs a
             vendor, drop the lead, and our AI handles the rest — proposals, chat, and instant payouts.
           </p>
-          <div className="mt-8 flex flex-col items-center gap-4">
-            <div className="flex gap-4">
-              <Link href="/referrer" className="px-6 py-3 rounded-2xl bg-purple-600 text-white hover:bg-purple-500">
-                Start Referring
-              </Link>
-              <a href="#features" className="px-6 py-3 rounded-2xl border border-purple-400 hover:bg-purple-600 hover:text-white">
-                Explore Features
-              </a>
-            </div>
-
-            {/* DEMO CHAT BUTTON */}
-            <Link
-              href="/chat/demo-123"
-              className="mt-6 px-6 py-3 rounded-2xl border border-purple-400 bg-white/5 hover:bg-purple-600 hover:text-white transition"
-            >
+          <div className="mt-8 flex justify-center gap-4">
+            <Link href="/referrer" className="px-6 py-3 rounded-2xl bg-purple-600 text-white hover:bg-purple-500">
+              Start Referring
+            </Link>
+            <a href="#features" className="px-6 py-3 rounded-2xl border border-purple-400 hover:bg-purple-600 hover:text-white">
+              Explore Features
+            </a>
+            <Link href="/chat/demo-123" className="px-6 py-3 rounded-2xl border border-purple-400 bg-white/5 hover:bg-purple-600 hover:text-white transition">
               🚀 Try the Chat Demo
             </Link>
           </div>
@@ -100,13 +93,13 @@ export default function LandingPage() {
         }
 
         @keyframes move-twink {
-          from {background-position: 0 0;}
-          to {background-position: -10000px 5000px;}
+          from { background-position: 0 0; }
+          to   { background-position: -10000px 5000px; }
         }
 
         @keyframes pulse {
-          0%, 100% {opacity: 0.6;}
-          50% {opacity: 0.9;}
+          0%, 100% { opacity: 0.6; }
+          50%       { opacity: 0.9; }
         }
       `}</style>
     </main>
