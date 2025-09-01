@@ -1,10 +1,11 @@
 // pages/api/chat.js
-import { createClient } from "@supabase/supabase-js";
+// Minimal, stable handler: tries Google Places (New) first; falls back to OpenAI.
+// No fancy imports; uses built-in fetch supported by Next.js API routes.
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const MAPS_KEY = process.env.GOOGLE_MAPS_API_KEY;
 
-// crude city lat/lng map for quick bias; add more as needed
+// very small city center map for bias; expand later
 const CITY_CENTER = {
   nashville: { lat: 36.1627, lng: -86.7816, radiusMeters: 45000 },
   austin: { lat: 30.2672, lng: -97.7431, radiusMeters: 45000 },
@@ -14,32 +15,34 @@ const CITY_CENTER = {
 };
 
 function parseSearch(text) {
-  // “find a bbq caterer in nashville”, “find taco trucks near austin”, etc.
-  const lowered = text.toLowerCase();
-  const m = lowered.match(/find (.+?)(?: in | near )([a-z\s]+)$/i) || lowered.match(/find (.+)$/i);
-  if (!m) return null;
+  if (!text) return null;
+  const lowered = String(text).toLowerCase().trim();
 
-  const query = (m[1] || "").trim();
-  let city = (m[2] || "").trim();
-  city = city.replace(/[^a-z\s]/g, "").trim();
+  // patterns: "find bbq caterer in nashville", "find taco trucks near austin", "find wedding florist"
+  const p1 = lowered.match(/^\s*find\s+(.+?)\s+(?:in|near)\s+([a-z\s]+)\s*$/i);
+  const p2 = lowered.match(/^\s*find\s+(.+?)\s*$/i);
 
-  return { query, city };
+  if (p1) {
+    return {
+      query: p1[1].trim(),
+      city: p1[2].replace(/[^a-z\s]/g, "").trim(),
+    };
+  }
+  if (p2) {
+    return { query: p2[1].trim(), city: "" };
+  }
+  return null;
 }
 
 async function placesSearchText({ query, city }) {
   if (!MAPS_KEY) throw new Error("GOOGLE_MAPS_API_KEY not set");
 
-  // resolve bias
-  let bias = CITY_CENTER["nashville"]; // default
-  if (city) {
-    const key = city.toLowerCase();
-    if (CITY_CENTER[key]) bias = CITY_CENTER[key];
-  }
+  // pick bias center
+  let bias = CITY_CENTER.nashville;
+  if (city && CITY_CENTER[city.toLowerCase()]) bias = CITY_CENTER[city.toLowerCase()];
 
   const payload = {
     textQuery: query + (city ? ` in ${city}` : ""),
-    // prefer business type results
-    includedType: "restaurant",
     languageCode: "en",
     maxResultCount: 8,
     locationBias: {
@@ -50,7 +53,7 @@ async function placesSearchText({ query, city }) {
     },
   };
 
-  const r = await fetch("https://places.googleapis.com/v1/places:searchText", {
+  const resp = await fetch("https://places.googleapis.com/v1/places:searchText", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -61,11 +64,12 @@ async function placesSearchText({ query, city }) {
     body: JSON.stringify(payload),
   });
 
-  const data = await r.json();
-  if (!r.ok) {
-    console.error("Places error:", data);
+  const data = await resp.json();
+  if (!resp.ok) {
+    console.error("Places API error", data);
     throw new Error("Places API error");
   }
+
   const items = (data.places || []).map((p) => ({
     id: p.id,
     name: p.displayName?.text || "Unknown",
@@ -76,6 +80,7 @@ async function placesSearchText({ query, city }) {
     phone: p.internationalPhoneNumber || "",
     website: p.websiteUri || "",
   }));
+
   return items;
 }
 
@@ -86,15 +91,15 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { text = "", sender = "referrer", lead_id } = req.body || {};
+    const body = req.body || {};
+    const text = String(body.text || "").trim();
 
-    // 1) If it looks like a vendor search, hit Places first
+    // 1) Try vendor search
     const parsed = parseSearch(text);
     if (parsed?.query) {
       try {
         const vendors = await placesSearchText(parsed);
         if (vendors.length > 0) {
-          // nice, return a formatted list the UI can show as a message
           const lines = vendors.map((v, i) => {
             const bits = [
               `**${i + 1}. ${v.name}**`,
@@ -105,30 +110,29 @@ export default async function handler(req, res) {
             ].filter(Boolean);
             return bits.join("  \n");
           });
+
           return res.status(200).json({
             reply:
-              `Here are some options for **${parsed.query}**${
+              `Here are options for **${parsed.query}**${
                 parsed.city ? ` in **${parsed.city}**` : ""
-              }:\n\n` +
-              lines.join("\n\n") +
-              `\n\nReply with a number and I’ll drop it into the lead form.`,
+              }:\n\n${lines.join("\n\n")}\n\nReply with a number to use it.`,
           });
-        } else {
-          return res
-            .status(200)
-            .json({ reply: `I looked for **${parsed.query}**${parsed.city ? ` near ${parsed.city}` : ""} but didn’t find solid matches. Try a nearby city or broader term?` });
         }
+
+        return res
+          .status(200)
+          .json({ reply: `I tried **${parsed.query}**${parsed.city ? ` in ${parsed.city}` : ""} but didn’t find solid matches. Try a nearby city or broader term?` });
       } catch (e) {
-        console.error(e);
-        // fall through to chat below
+        console.error("Places search failed, falling back to chat:", e);
+        // fallthrough to chat
       }
     }
 
-    // 2) Otherwise, use OpenAI for general chat
+    // 2) General chat fallback
     if (!OPENAI_API_KEY) {
       return res.status(200).json({
         reply:
-          "Ask me to “Find a {category} in {city}” (e.g., “Find a BBQ caterer in Nashville”) or tell me who to introduce and I’ll draft the intro. (Set OPENAI_API_KEY for richer replies.)",
+          "Ask me to “Find a {category} in {city}” (e.g., “Find a BBQ caterer in Nashville”), or paste vendor + host contact and I’ll draft the intro.",
       });
     }
 
@@ -141,15 +145,15 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model: "gpt-4o-mini",
         temperature: 0.6,
+        max_tokens: 320,
         messages: [
           {
             role: "system",
             content:
-              "You are CAP’s friendly ops AI. Be concise, proactive, and help users capture leads and keep momentum. If they ask about vendors, instruct them they can say: 'Find {category} in {city}'.",
+              "You are CAP’s friendly ops AI. Be concise, proactive, and help users capture leads. If they want vendors, tell them they can say: 'Find {category} in {city}'.",
           },
           { role: "user", content: text },
         ],
-        max_tokens: 320,
       }),
     });
 
@@ -157,7 +161,7 @@ export default async function handler(req, res) {
     const reply = data?.choices?.[0]?.message?.content || "👍";
     return res.status(200).json({ reply });
   } catch (err) {
-    console.error("chat error", err);
+    console.error("chat error:", err);
     return res.status(500).json({ error: "Chat error", details: String(err?.message || err) });
   }
 }
