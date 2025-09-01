@@ -10,15 +10,18 @@ export default function LandingPage() {
         <div className="stars"></div>
         <div className="twinkling"></div>
         <div className="galaxy-glow"></div>
-        <div className="sparkle-layer"></div>
       </div>
 
       {/* HEADER */}
       <header className="sticky top-0 z-40 bg-black/70 backdrop-blur border-b border-gray-800">
         <div className="mx-auto max-w-7xl px-6 h-16 flex items-center justify-between">
-          <Link href="/" className="font-black tracking-tight text-xl text-white">
-            CAPITALIZE
-          </Link>
+          <div className="flex flex-col">
+            <Link href="/" className="font-black tracking-tight text-xl text-white">
+              CAPITALIZE
+            </Link>
+            {/* AI button under CAPITALIZE */}
+            <HelpAI role="landing" userId="dev-ben" />
+          </div>
           <nav className="hidden md:flex items-center gap-6 text-sm">
             <a href="#how" className="hover:text-purple-300">How it Works</a>
             <a href="#roles" className="hover:text-purple-300">Roles</a>
@@ -114,15 +117,53 @@ export default function LandingPage() {
         </div>
       </footer>
 
-      {/* Floating AI helper */}
-      <HelpAI role="landing" userId="dev-ben" />
+      {/* Styles for stars and galaxy */}
+      <style jsx global>{`
+        .stars, .twinkling, .galaxy-glow {
+          position: absolute;
+          top: 0; left: 0;
+          width: 100%; height: 100%;
+          display: block;
+          pointer-events: none;
+        }
 
-      {/* (keep your galaxy/star CSS at the bottom unchanged) */}
+        .stars {
+          background: url("https://www.transparenttextures.com/patterns/stardust.png") repeat;
+          z-index: 0;
+          opacity: 0.7;
+        }
+
+        .twinkling {
+          background: transparent url("https://www.transparenttextures.com/patterns/stardust.png") repeat;
+          animation: move-twink 200s linear infinite;
+          z-index: 1;
+          opacity: 0.35;
+        }
+
+        .galaxy-glow {
+          background: radial-gradient(
+            circle at center,
+            rgba(150, 0, 200, 0.55),
+            rgba(0, 0, 0, 0) 70%
+          );
+          z-index: 2;
+          animation: pulse 8s ease-in-out infinite;
+        }
+
+        @keyframes move-twink {
+          from { background-position: 0 0; }
+          to   { background-position: -10000px 5000px; }
+        }
+
+        @keyframes pulse {
+          0%, 100% { opacity: 0.55; }
+          50% { opacity: 0.9; }
+        }
+      `}</style>
     </main>
   );
 }
 
-/* ---- helper cards ---- */
 function Card({ title, body }) {
   return (
     <div className="rounded-2xl border border-gray-800 bg-black/50 p-6">
