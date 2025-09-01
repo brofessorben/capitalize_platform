@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
-import BackButton from "@/app/components/BackButton";
-import HelpAI from "@/app/components/HelpAI";
+import BackButton from "../../components/BackButton";
+import HelpAI from "../../components/HelpAI";
 
 export default function VendorDash() {
   return (
@@ -78,7 +78,6 @@ export default function VendorDash() {
         </section>
       </div>
 
-      {/* In-app helper */}
       <HelpAI role="vendor" userId="dev-ben" />
     </div>
   );
