@@ -34,10 +34,11 @@ function warmGreeting(role = "guide") {
     `“Summarize this long message and suggest my reply.”`,
     `“Create a referral link blurb and CTA.”`,
   ];
+
   const roleTips = {
     referrer: [
-      "“Log a quick referral: host name, event date, headcount.”",
-      "“Write me a sharable ‘why this vendor’ blurb.”",
+      "“Log a referral: host name, date, headcount, budget.”",
+      "“Write a sharable ‘why this vendor’ blurb.”",
       "“What’s my rewards status?”",
     ],
     vendor: [
@@ -47,19 +48,26 @@ function warmGreeting(role = "guide") {
     ],
     host: [
       "“Compare two vendor quotes and call out tradeoffs.”",
-      "“Make me a timeline for day-of.”",
-      "“Rewrite my message more confidently but friendly.”",
+      "“Make me a day-of timeline.”",
+      "“Rewrite my message confident but friendly.”",
     ],
     guide: [],
   };
 
-  const body =
+  const base =
     `Hey! ${pick(emojis)} ${pick(hooks)}.\n\n` +
     `Try me with:\n• ${pick(promptsCommon)}\n• ${pick(promptsCommon)}\n` +
-    (roleTips[role]?.length ? `• ${pick(roleTips[role])}\n` : "") +
-    `\nOr just drop context (“We’ve got ${pick(["120","80","200"])} guests and a ${pick(["$30","$50","$75"])}/pp target”) and I’ll tee up next steps.`;
+    (roleTips[role]?.length ? `• ${pick(roleTips[role])}\n` : "");
 
-  return body;
+  const refExtra =
+    `\n**Referrers:** drop the vendor + host details and I’ll handle intros.\n` +
+    `• Vendor: name + phone/email\n` +
+    `• Host: name + phone/email + event date + headcount + budget (if known)\n` +
+    `I’ll draft the intro we settle on and take care of the rest from there.\n\n` +
+    `Want local options now? Type: \`/vendors <what> in <city>\`\n` +
+    `e.g., \`/vendors taco catering in Austin\``;
+
+  return role === "referrer" ? base + refExtra : base + `\nOr just drop context and I’ll tee up next steps.`;
 }
 
 export default function HelpAI({
@@ -109,17 +117,50 @@ export default function HelpAI({
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
 
-  // Open + auto-greet (fresh, fun, unique each time)
+  // Open + auto-greet
   const openChat = () => {
     setOpen(true);
     const greeting = warmGreeting(role);
     setMessages((m) => [...m, { role: "assistant", content: greeting }]);
   };
 
+  // simple slash command: /vendors <what> in <city>
+  async function tryVendorCommand(text) {
+    const m = text.match(/^\/vendors\s+(.+)/i);
+    if (!m) return false;
+    const q = m[1]; // free-form
+    setMessages((msgs) => [...msgs, { role: "assistant", content: `Searching vendors: ${q} …` }]);
+    try {
+      const res = await fetch(`/api/vendors?query=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Vendor search failed");
+      const lines = (data.results || []).slice(0, 6).map((v, i) => {
+        const contact = [v.phone, v.website].filter(Boolean).join(" • ");
+        return `${i + 1}. ${v.name}${v.rating ? ` (${v.rating}★)` : ""}\n   ${v.address}${contact ? `\n   ${contact}` : ""}`;
+      });
+      setMessages((msgs) => [
+        ...msgs,
+        { role: "assistant", content: lines.length ? lines.join("\n\n") : "No vendors found (try another query/city)." },
+      ]);
+    } catch (err) {
+      setMessages((msgs) => [
+        ...msgs,
+        { role: "assistant", content: `Sorry—vendor search error: ${String(err?.message || err)}` },
+      ]);
+    }
+    return true;
+  }
+
   async function sendMessage(e) {
     e?.preventDefault?.();
     const text = input.trim();
     if (!text || sending) return;
+
+    // Intercept /vendors command
+    if (await tryVendorCommand(text)) {
+      setInput("");
+      return;
+    }
 
     setMessages((m) => [...m, { role: "user", content: text }]);
     setInput("");
@@ -214,7 +255,8 @@ export default function HelpAI({
           value={input}
           onChange={(e) => setInput(e.target.value)}
         />
-        <div className="mt-2 flex justify-end">
+        <div className="mt-2 flex justify-between text-[11px] text-neutral-400">
+          <div>Tip: try <code>/vendors pizza in Denver</code></div>
           <button
             disabled={sending || !input.trim()}
             className="px-3 py-1.5 rounded-lg bg-emerald-500 text-black font-semibold disabled:opacity-50"
