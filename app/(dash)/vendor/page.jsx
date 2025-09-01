@@ -1,3 +1,4 @@
+// app/(dash)/vendor/page.jsx
 export default function VendorDash() {
   return (
     <div className="p-6 space-y-6">
