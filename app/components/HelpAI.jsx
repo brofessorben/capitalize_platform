@@ -1,193 +1,175 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 
-export default function HelpAI({ role = "generic", userId = "anon", position = "corner" }) {
+/** Small ChatGPT-ish logo */
+function GPTMark({ className = "w-5 h-5" }) {
+  return (
+    <svg viewBox="0 0 256 256" className={className} aria-hidden="true">
+      <path
+        d="M127.8 15c-22.6 0-43.6 8.8-59.6 24.8C52.2 55.8 43.4 76.8 43.4 99.4c0 5.3.6 10.6 1.7 15.6C25.3 127.7 12 147.4 12 169.7 12 207 42.7 237.7 80 237.7h13.1c7.8 0 14.1-6.3 14.1-14.1v-18.1c6.9 3.3 14.6 5.1 22.6 5.1 8 0 15.7-1.8 22.6-5.1v18.1c0 7.8 6.3 14.1 14.1 14.1H190c37.3 0 68-30.7 68-68 0-22.3-13.3-42-33.1-54.7 1.1-5 1.7-10.3 1.7-15.6 0-22.6-8.8-43.6-24.8-59.6C171.8 23.8 150.8 15 128.2 15h-.4Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+export default function HelpAI({
+  userId = "demo-user",
+  role = "guide",
+  placeholder = "Ask a question! e.g., “How do referrals work?”, “Draft a vendor intro”, “What’s next for a new host?”",
+}) {
+  // open/close
   const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [input, setInput] = useState("");
-  const [messages, setMessages] = useState([
-    {
-      id: "sys-hello",
-      sender: "ai",
-      text:
-        "Hey! I’m your CAPITALIZE assistant. Ask me about Referrers, Vendors, Hosts, payouts, proposals, or anything else. I can also help with general event questions.",
-      created_at: new Date().toISOString(),
-    },
-  ]);
-  const scrollerRef = useRef(null);
+
+  // draggable position
+  const [pos, setPos] = useState({ top: 100, left: typeof window !== "undefined" ? window.innerWidth / 2 - 180 : 120 });
+  const dragRef = useRef(null);
+  const dragging = useRef(false);
+  const offset = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
-    if (!open) return;
-    const el = scrollerRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [open, messages]);
+    const onMove = (e) => {
+      if (!dragging.current) return;
+      const x = e.clientX - offset.current.x;
+      const y = e.clientY - offset.current.y;
+      setPos((p) => ({
+        top: Math.max(8, Math.min(window.innerHeight - 80, y)),
+        left: Math.max(8, Math.min(window.innerWidth - 320, x)),
+      }));
+    };
+    const onUp = () => (dragging.current = false);
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
+
+  const onDragStart = (e) => {
+    if (!dragRef.current) return;
+    dragging.current = true;
+    const rect = dragRef.current.getBoundingClientRect();
+    offset.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  };
+
+  // chat state
+  const [messages, setMessages] = useState([
+    { role: "assistant", content: "Hey! I’m your CAPITALIZE guide. Ask me anything or tell me what you’re trying to do." },
+  ]);
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
 
   async function sendMessage(e) {
     e?.preventDefault?.();
     const text = input.trim();
-    if (!text || busy) return;
-    setBusy(true);
-    setInput("");
+    if (!text || sending) return;
 
-    const optimistic = { id: crypto.randomUUID(), sender: "user", text, created_at: new Date().toISOString() };
-    setMessages((m) => [...m, optimistic]);
+    setMessages((m) => [...m, { role: "user", content: text }]);
+    setInput("");
+    setSending(true);
 
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          lead_id: `${role}-${userId}`,
-          sender: "user",
-          text: decoratePrompt(text, role),
+          lead_id: `ui-${userId}-${Date.now()}`,
+          sender: role || "guide",
+          text,
         }),
       });
       const data = await res.json();
-      const reply =
-        (data && (data.reply || data.message)) ||
-        "I’m having trouble reaching the model right now. Try again in a moment.";
-      setMessages((m) => [
-        ...m,
-        { id: crypto.randomUUID(), sender: "ai", text: reply, created_at: new Date().toISOString() },
-      ]);
+      if (!res.ok) throw new Error(data?.error || "Chat error");
+      setMessages((m) => [...m, { role: "assistant", content: data.reply || "(no reply)" }]);
     } catch (err) {
       setMessages((m) => [
         ...m,
-        {
-          id: crypto.randomUUID(),
-          sender: "ai",
-          text: "⚠️ Oops, something went wrong. Try again soon.",
-          created_at: new Date().toISOString(),
-        },
+        { role: "assistant", content: `Sorry—something went wrong: ${String(err?.message || err)}` },
       ]);
     } finally {
-      setBusy(false);
+      setSending(false);
     }
   }
 
-  /* ---- positioning logic ---- */
-  const posClasses =
-    position === "dashboard"
-      ? "absolute top-2 left-2"
-      : position === "landing"
-      ? "absolute -left-24 top-10"
-      : "fixed bottom-6 right-6";
-
-  return (
-    <>
-      {/* Floating button */}
+  // Closed state: show only the pulsing button (at pos)
+  if (!open) {
+    return (
       <button
-        aria-label="Open AI helper"
         onClick={() => setOpen(true)}
-        className={`${posClasses} z-[1000] flex flex-col items-center justify-center w-20 h-20 rounded-full bg-emerald-500 hover:bg-emerald-400 text-white shadow-2xl animate-pulse-glow relative`}
+        style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 50 }}
+        className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500 text-black font-semibold shadow-lg animate-pulse"
+        title="Ask AI (Powered by OpenAI)"
       >
-        <ChatGPTSwirl className="w-10 h-10" />
-        <span className="text-[10px] font-semibold mt-1">Ask AI</span>
-        <span className="absolute inset-0 rounded-full border-4 border-emerald-400 opacity-50 animate-ping"></span>
+        <GPTMark className="w-4 h-4" />
+        Ask AI
       </button>
+    );
+  }
 
-      {/* Panel */}
-      {open && (
-        <div className="fixed inset-0 z-[1001] flex items-end sm:items-center sm:justify-end">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setOpen(false)} aria-hidden />
-          <div className="relative m-3 sm:mr-5 sm:mb-5 w-full sm:w-[420px] rounded-2xl border border-neutral-800 bg-neutral-950 text-neutral-100 shadow-2xl">
-            <div className="flex items-center justify-between p-4 border-b border-neutral-800">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-neutral-800 grid place-items-center">
-                  <ChatGPTSwirl className="w-5 h-5" />
-                </div>
-                <div className="leading-tight">
-                  <div className="font-semibold">Assistant</div>
-                  <div className="text-xs text-neutral-400">Powered by OpenAI</div>
-                </div>
-              </div>
-              <button
-                onClick={() => setOpen(false)}
-                className="rounded-lg px-2 py-1 text-sm text-neutral-300 hover:bg-neutral-800"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Messages */}
-            <div ref={scrollerRef} className="max-h-[55vh] overflow-y-auto p-4 space-y-3">
-              {messages.map((m) => (
-                <div key={m.id} className={`flex ${m.sender === "ai" ? "justify-start" : "justify-end"}`}>
-                  <div
-                    className={`max-w-[80%] rounded-2xl border px-3 py-2 text-sm ${
-                      m.sender === "ai"
-                        ? "bg-neutral-900 border-neutral-800"
-                        : "bg-emerald-600 text-white border-emerald-700"
-                    }`}
-                  >
-                    {m.text}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Composer */}
-            <form onSubmit={sendMessage} className="p-3 border-t border-neutral-800">
-              <div className="flex items-end gap-2">
-                <textarea
-                  className="flex-1 resize-none rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-600/30"
-                  rows={2}
-                  placeholder={`Ask a question! (e.g. "How do referrals work?", "How do vendors get paid?", "What should a proposal include?")`}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                />
-                <button
-                  disabled={busy || input.trim() === ""}
-                  className="shrink-0 h-10 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white font-medium disabled:opacity-50"
-                >
-                  {busy ? "…" : "Send"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      <style jsx global>{`
-        @keyframes pulse-glow {
-          0%, 100% {
-            box-shadow: 0 0 15px rgba(16, 185, 129, 0.8), 0 0 30px rgba(16, 185, 129, 0.6);
-          }
-          50% {
-            box-shadow: 0 0 25px rgba(16, 185, 129, 1), 0 0 50px rgba(16, 185, 129, 0.8);
-          }
-        }
-        .animate-pulse-glow {
-          animation: pulse-glow 2s infinite;
-        }
-      `}</style>
-    </>
-  );
-}
-
-/* ---------- helpers ---------- */
-
-function decoratePrompt(text, role) {
-  const preface = `You are the CAPITALIZE in-app assistant. Be concise, helpful, and specific. 
-If the user asks about the product, cover capabilities for Referrers, Vendors, and Hosts. 
-If they ask general event/vendor questions, give pragmatic steps.`;
-  return `${preface}\n\nUser (role=${role}): ${text}`;
-}
-
-function ChatGPTSwirl({ className = "w-5 h-5" }) {
+  // Open: chat box appears exactly where button was; header is draggable and contains the same button look
   return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path
-        d="M12 2.5a5.5 5.5 0 014.9 3l.4.8a4.8 4.8 0 013.8 4.7 4.8 4.8 0 01-1.9 3.8l-.7.5a5.5 5.5 0 01-4.9 6.2 5.5 5.5 0 01-4.9-3l-.4-.8a4.8 4.8 0 01-3.8-4.7c0-1.5.7-2.8 1.9-3.8l.7-.5A5.5 5.5 0 0112 2.5z"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        opacity="0.3"
-      />
-      <path
-        d="M12 6.5c2.4 0 3.5 1.9 3.9 2.7.2.3.6.5 1 .5 1.5 0 2.6 1.1 2.6 2.6 0 .9-.5 1.7-1.2 2.2-.3.2-.5.6-.4 1 0 0 .1.4.1.6a3.9 3.9 0 01-3.9 3.9c-2.4 0-3.5-1.9-3.9-2.7a1.2 1.2 0 00-1-.5 2.6 2.6 0 01-2.6-2.6c0-.9.5-1.7 1.2-2.2.3-.2.5-.6.4-1 0 0-.1-.4-.1-.6A3.9 3.9 0 0112 6.5z"
-        stroke="currentColor"
-        strokeWidth="1.3"
-      />
-    </svg>
+    <div
+      ref={dragRef}
+      style={{ position: "fixed", top: pos.top, left: pos.left, width: 340, zIndex: 50 }}
+      className="rounded-2xl shadow-2xl border border-neutral-800 bg-neutral-950/95 backdrop-blur overflow-hidden"
+    >
+      {/* Header / drag handle */}
+      <div
+        onMouseDown={onDragStart}
+        className="cursor-grab active:cursor-grabbing select-none flex items-center justify-between px-3 py-2 bg-neutral-900 border-b border-neutral-800"
+      >
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-2 px-2 py-1 rounded-lg bg-emerald-500 text-black font-semibold">
+            <GPTMark className="w-4 h-4" />
+            Ask AI
+          </span>
+          <span className="text-[11px] text-neutral-400">Powered by OpenAI</span>
+        </div>
+        <button
+          onClick={() => setOpen(false)}
+          className="text-neutral-400 hover:text-white px-2 py-1 rounded"
+          aria-label="Close"
+        >
+          ✕
+        </button>
+      </div>
+
+      {/* Messages */}
+      <div className="max-h-[50vh] overflow-y-auto p-3 space-y-2">
+        {messages.map((m, i) => (
+          <div
+            key={i}
+            className={
+              m.role === "assistant"
+                ? "bg-neutral-900 border border-neutral-800 rounded-xl p-2 text-sm"
+                : "bg-emerald-600/20 border border-emerald-700 rounded-xl p-2 text-sm"
+            }
+          >
+            {m.content}
+          </div>
+        ))}
+      </div>
+
+      {/* Composer */}
+      <form onSubmit={sendMessage} className="p-3 border-t border-neutral-800 bg-neutral-950">
+        <textarea
+          rows={2}
+          className="w-full resize-none rounded-xl bg-neutral-900 border border-neutral-800 p-2 text-sm outline-none focus:ring-2 focus:ring-emerald-600"
+          placeholder={placeholder}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+        />
+        <div className="mt-2 flex justify-end">
+          <button
+            disabled={sending || !input.trim()}
+            className="px-3 py-1.5 rounded-lg bg-emerald-500 text-black font-semibold disabled:opacity-50"
+          >
+            {sending ? "Thinking…" : "Send"}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
