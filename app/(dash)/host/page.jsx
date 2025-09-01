@@ -1,3 +1,4 @@
+// app/(dash)/host/page.jsx
 export default function HostDash() {
   return (
     <div className="p-6 space-y-6">
