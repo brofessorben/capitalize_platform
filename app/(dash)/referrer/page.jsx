@@ -1,6 +1,6 @@
 "use client";
 
-import BackButton from "@/app/components/BackButton";
+import BackButton from "../../components/BackButton";
 
 export default function ReferrerDash() {
   return (
@@ -12,8 +12,7 @@ export default function ReferrerDash() {
 
       <div className="rounded-2xl border p-4">
         <p className="text-gray-600">
-          Your referred leads will show here. Submit a lead and track its
-          progress.
+          Your referred leads will show here. Submit a lead and track its progress.
         </p>
       </div>
     </div>
