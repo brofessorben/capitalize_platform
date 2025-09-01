@@ -32,6 +32,4 @@ export default function HostDash() {
       </section>
     </div>
   );
-}  );
-}  );
 }
