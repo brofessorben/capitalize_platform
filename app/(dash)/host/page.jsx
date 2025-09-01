@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
-import BackButton from "@/app/components/BackButton";
-import HelpAI from "@/app/components/HelpAI";
+import BackButton from "../../components/BackButton";
+import HelpAI from "../../components/HelpAI";
 
 export default function HostDash() {
   return (
@@ -28,7 +28,7 @@ export default function HostDash() {
           <KPI label="Budget Used" value="$0.00" />
         </div>
 
-        {/* Your Requests (placeholder) */}
+        {/* Your Requests */}
         <section className="space-y-3">
           <h2 className="font-semibold">Your Requests</h2>
           <div className="rounded-2xl border border-neutral-800 bg-neutral-950/60">
@@ -78,7 +78,6 @@ export default function HostDash() {
         </section>
       </div>
 
-      {/* In-app helper */}
       <HelpAI role="host" userId="dev-ben" />
     </div>
   );
