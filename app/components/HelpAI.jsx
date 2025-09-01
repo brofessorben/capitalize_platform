@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 
-/** Small ChatGPT-ish logo */
+/** Tiny ChatGPT-ish mark */
 function GPTMark({ className = "w-5 h-5" }) {
   return (
     <svg viewBox="0 0 256 256" className={className} aria-hidden="true">
@@ -13,16 +13,67 @@ function GPTMark({ className = "w-5 h-5" }) {
   );
 }
 
+function pick(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function warmGreeting(role = "guide") {
+  const emojis = ["✨", "🚀", "🧭", "🤝", "🍰", "🎉", "🧠", "⚡️"];
+  const hooks = [
+    "I'm your on-call deal co-pilot",
+    "Think of me as your tiny ops team in a box",
+    "Let's turn chaos into booked gigs",
+    "I'm the glue between hosts, vendors, and wins",
+    "Ideas to invoice—faster",
+    "Your AI concierge for CAPITALIZE",
+  ];
+  const promptsCommon = [
+    `“Draft an intro DM to a ${pick(["wedding","corporate","non-profit","birthday","festival"])} host.”`,
+    `“Gut-check this budget: ${pick(["120 ppl", "75 ppl", "200 ppl"])}, ${pick(["$25","$45","$60"])}/pp.”`,
+    `“Turn this into a proposal with upsells: taco bar + mocktails.”`,
+    `“Summarize this long message and suggest my reply.”`,
+    `“Create a referral link blurb and CTA.”`,
+  ];
+  const roleTips = {
+    referrer: [
+      "“Log a quick referral: host name, event date, headcount.”",
+      "“Write me a sharable ‘why this vendor’ blurb.”",
+      "“What’s my rewards status?”",
+    ],
+    vendor: [
+      "“Draft a proposal with two tiers and upsells.”",
+      "“Turn this lead into an email + SMS follow-up.”",
+      "“Suggest a ‘book-now’ incentive.”",
+    ],
+    host: [
+      "“Compare two vendor quotes and call out tradeoffs.”",
+      "“Make me a timeline for day-of.”",
+      "“Rewrite my message more confidently but friendly.”",
+    ],
+    guide: [],
+  };
+
+  const body =
+    `Hey! ${pick(emojis)} ${pick(hooks)}.\n\n` +
+    `Try me with:\n• ${pick(promptsCommon)}\n• ${pick(promptsCommon)}\n` +
+    (roleTips[role]?.length ? `• ${pick(roleTips[role])}\n` : "") +
+    `\nOr just drop context (“We’ve got ${pick(["120","80","200"])} guests and a ${pick(["$30","$50","$75"])}/pp target”) and I’ll tee up next steps.`;
+
+  return body;
+}
+
 export default function HelpAI({
   userId = "demo-user",
   role = "guide",
-  placeholder = "Ask a question! e.g., “How do referrals work?”, “Draft a vendor intro”, “What’s next for a new host?”",
+  placeholder = "Ask anything. Example: “Draft a proposal with upsells for 120 guests at $40/pp.”",
 }) {
-  // open/close
   const [open, setOpen] = useState(false);
 
-  // draggable position
-  const [pos, setPos] = useState({ top: 100, left: typeof window !== "undefined" ? window.innerWidth / 2 - 180 : 120 });
+  // draggable
+  const [pos, setPos] = useState({
+    top: 100,
+    left: typeof window !== "undefined" ? window.innerWidth / 2 - 180 : 120,
+  });
   const dragRef = useRef(null);
   const dragging = useRef(false);
   const offset = useRef({ x: 0, y: 0 });
@@ -32,13 +83,12 @@ export default function HelpAI({
       if (!dragging.current) return;
       const x = e.clientX - offset.current.x;
       const y = e.clientY - offset.current.y;
-      setPos((p) => ({
+      setPos({
         top: Math.max(8, Math.min(window.innerHeight - 80, y)),
-        left: Math.max(8, Math.min(window.innerWidth - 320, x)),
-      }));
+        left: Math.max(8, Math.min(window.innerWidth - 340, x)),
+      });
     };
     const onUp = () => (dragging.current = false);
-
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
     return () => {
@@ -48,18 +98,23 @@ export default function HelpAI({
   }, []);
 
   const onDragStart = (e) => {
-    if (!dragRef.current) return;
     dragging.current = true;
-    const rect = dragRef.current.getBoundingClientRect();
+    const rect = dragRef.current?.getBoundingClientRect();
+    if (!rect) return;
     offset.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
   };
 
   // chat state
-  const [messages, setMessages] = useState([
-    { role: "assistant", content: "Hey! I’m your CAPITALIZE guide. Ask me anything or tell me what you’re trying to do." },
-  ]);
+  const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+
+  // Open + auto-greet (fresh, fun, unique each time)
+  const openChat = () => {
+    setOpen(true);
+    const greeting = warmGreeting(role);
+    setMessages((m) => [...m, { role: "assistant", content: greeting }]);
+  };
 
   async function sendMessage(e) {
     e?.preventDefault?.();
@@ -93,11 +148,10 @@ export default function HelpAI({
     }
   }
 
-  // Closed state: show only the pulsing button (at pos)
   if (!open) {
     return (
       <button
-        onClick={() => setOpen(true)}
+        onClick={openChat}
         style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 50 }}
         className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500 text-black font-semibold shadow-lg animate-pulse"
         title="Ask AI (Powered by OpenAI)"
@@ -108,7 +162,6 @@ export default function HelpAI({
     );
   }
 
-  // Open: chat box appears exactly where button was; header is draggable and contains the same button look
   return (
     <div
       ref={dragRef}
@@ -137,7 +190,7 @@ export default function HelpAI({
       </div>
 
       {/* Messages */}
-      <div className="max-h-[50vh] overflow-y-auto p-3 space-y-2">
+      <div className="max-h[50vh] max-h-[50vh] overflow-y-auto p-3 space-y-2">
         {messages.map((m, i) => (
           <div
             key={i}
