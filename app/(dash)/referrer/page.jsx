@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
-import BackButton from "@/app/components/BackButton";
-import HelpAI from "@/app/components/HelpAI";
+import BackButton from "../../components/BackButton";
+import HelpAI from "../../components/HelpAI";
 
 export default function ReferrerDash() {
   return (
@@ -47,7 +47,7 @@ export default function ReferrerDash() {
           />
         </section>
 
-        {/* Recent Leads (placeholder) */}
+        {/* Recent Leads */}
         <section className="space-y-3">
           <h2 className="font-semibold">Recent Leads</h2>
           <div className="rounded-2xl border border-neutral-800 bg-neutral-950/60">
@@ -78,7 +78,6 @@ export default function ReferrerDash() {
         </section>
       </div>
 
-      {/* In-app helper */}
       <HelpAI role="referrer" userId="dev-ben" />
     </div>
   );
