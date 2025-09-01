@@ -1,6 +1,6 @@
 "use client";
 
-import BackButton from "@/app/components/BackButton";
+import BackButton from "../../components/BackButton";
 
 export default function HostDash() {
   return (
@@ -35,4 +35,5 @@ function KPI({ label, value }) {
       <div className="text-2xl font-bold">{value}</div>
     </div>
   );
+}  );
 }
