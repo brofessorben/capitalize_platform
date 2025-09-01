@@ -1,10 +1,84 @@
 // pages/api/chat.js
-/**
- * Smart chat endpoint:
- * - Detects vendor-search intent like "find/suggest/recommend ... in CITY"
- * - If detected, calls Google Places (via your env key) and returns a curated list
- * - Otherwise, falls back to regular OpenAI chat
- */
+import { createClient } from "@supabase/supabase-js";
+
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const MAPS_KEY = process.env.GOOGLE_MAPS_API_KEY;
+
+// crude city lat/lng map for quick bias; add more as needed
+const CITY_CENTER = {
+  nashville: { lat: 36.1627, lng: -86.7816, radiusMeters: 45000 },
+  austin: { lat: 30.2672, lng: -97.7431, radiusMeters: 45000 },
+  atlanta: { lat: 33.749, lng: -84.388, radiusMeters: 45000 },
+  miami: { lat: 25.7617, lng: -80.1918, radiusMeters: 45000 },
+  chicago: { lat: 41.8781, lng: -87.6298, radiusMeters: 50000 },
+};
+
+function parseSearch(text) {
+  // “find a bbq caterer in nashville”, “find taco trucks near austin”, etc.
+  const lowered = text.toLowerCase();
+  const m = lowered.match(/find (.+?)(?: in | near )([a-z\s]+)$/i) || lowered.match(/find (.+)$/i);
+  if (!m) return null;
+
+  const query = (m[1] || "").trim();
+  let city = (m[2] || "").trim();
+  city = city.replace(/[^a-z\s]/g, "").trim();
+
+  return { query, city };
+}
+
+async function placesSearchText({ query, city }) {
+  if (!MAPS_KEY) throw new Error("GOOGLE_MAPS_API_KEY not set");
+
+  // resolve bias
+  let bias = CITY_CENTER["nashville"]; // default
+  if (city) {
+    const key = city.toLowerCase();
+    if (CITY_CENTER[key]) bias = CITY_CENTER[key];
+  }
+
+  const payload = {
+    textQuery: query + (city ? ` in ${city}` : ""),
+    // prefer business type results
+    includedType: "restaurant",
+    languageCode: "en",
+    maxResultCount: 8,
+    locationBias: {
+      circle: {
+        center: { latitude: bias.lat, longitude: bias.lng },
+        radius: bias.radiusMeters || 45000,
+      },
+    },
+  };
+
+  const r = await fetch("https://places.googleapis.com/v1/places:searchText", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": MAPS_KEY,
+      "X-Goog-FieldMask":
+        "places.id,places.displayName,places.formattedAddress,places.primaryType,places.rating,places.userRatingCount,places.websiteUri,places.internationalPhoneNumber",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await r.json();
+  if (!r.ok) {
+    console.error("Places error:", data);
+    throw new Error("Places API error");
+  }
+  const items = (data.places || []).map((p) => ({
+    id: p.id,
+    name: p.displayName?.text || "Unknown",
+    address: p.formattedAddress || "",
+    type: p.primaryType || "",
+    rating: p.rating || null,
+    reviews: p.userRatingCount || null,
+    phone: p.internationalPhoneNumber || "",
+    website: p.websiteUri || "",
+  }));
+  return items;
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -12,148 +86,78 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { text = "", sender = "user", lead_id = "general" } = req.body || {};
-    const openaiKey = process.env.OPENAI_API_KEY;
+    const { text = "", sender = "referrer", lead_id } = req.body || {};
 
-    if (!text || typeof text !== "string") {
-      return res.status(400).json({ error: "Missing text" });
-    }
-
-    // 1) Try to detect vendor-search intent
-    const intent = detectVendorIntent(text);
-    if (intent) {
-      const places = await searchVendors(intent.query, intent.location);
-      if (places?.length) {
-        const top = places.slice(0, 5);
-        const lines = top.map((v, i) => {
-          const rating =
-            v.rating ? ` — ⭐ ${v.rating}${v.reviews ? ` (${v.reviews})` : ""}` : "";
-          const phone = v.phone ? ` • ${v.phone}` : "";
-          const web = v.website ? ` • ${v.website}` : "";
-          return `${i + 1}. ${v.name}${rating}\n   ${v.address}${phone}${web}`;
-        });
-
-        const reply =
-          `Here are some solid ${intent.query}${intent.location ? ` near ${intent.location}` : ""} I found:\n\n` +
-          lines.join("\n") +
-          `\n\nWant me to draft an intro message to the top picks or save any to your lead?`;
-
-        return res.status(200).json({ reply, mode: "vendors" });
+    // 1) If it looks like a vendor search, hit Places first
+    const parsed = parseSearch(text);
+    if (parsed?.query) {
+      try {
+        const vendors = await placesSearchText(parsed);
+        if (vendors.length > 0) {
+          // nice, return a formatted list the UI can show as a message
+          const lines = vendors.map((v, i) => {
+            const bits = [
+              `**${i + 1}. ${v.name}**`,
+              v.address && `• ${v.address}`,
+              v.phone && `• ${v.phone}`,
+              v.website && `• ${v.website}`,
+              v.rating && `• ⭐ ${v.rating} (${v.reviews || 0})`,
+            ].filter(Boolean);
+            return bits.join("  \n");
+          });
+          return res.status(200).json({
+            reply:
+              `Here are some options for **${parsed.query}**${
+                parsed.city ? ` in **${parsed.city}**` : ""
+              }:\n\n` +
+              lines.join("\n\n") +
+              `\n\nReply with a number and I’ll drop it into the lead form.`,
+          });
+        } else {
+          return res
+            .status(200)
+            .json({ reply: `I looked for **${parsed.query}**${parsed.city ? ` near ${parsed.city}` : ""} but didn’t find solid matches. Try a nearby city or broader term?` });
+        }
+      } catch (e) {
+        console.error(e);
+        // fall through to chat below
       }
-
-      return res
-        .status(200)
-        .json({
-          reply: `I looked for **${intent.query}**${intent.location ? ` near ${intent.location}` : ""} but didn’t find good matches. Try a different category or nearby city?`,
-          mode: "vendors",
-        });
     }
 
-    // 2) Fall back to OpenAI for general chat
-    if (!openaiKey) {
-      // graceful fallback if no key
+    // 2) Otherwise, use OpenAI for general chat
+    if (!OPENAI_API_KEY) {
       return res.status(200).json({
         reply:
-          "AI chat is almost ready. Add OPENAI_API_KEY in your Vercel env to enable full answers.",
-        mode: "plain",
+          "Ask me to “Find a {category} in {city}” (e.g., “Find a BBQ caterer in Nashville”) or tell me who to introduce and I’ll draft the intro. (Set OPENAI_API_KEY for richer replies.)",
       });
     }
-
-    const messages = [
-      {
-        role: "system",
-        content:
-          "You are the CAPITALIZE concierge. Be concise, fun, and helpful. If the user is a referrer, guide them to share host + vendor contact details and the need. If a host, help them specify date, headcount, budget, constraints. If a vendor, help them respond with quick proposals. Keep momentum, avoid long walls of text.",
-      },
-      { role: "user", content: text },
-    ];
 
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${openaiKey}`,
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
         model: "gpt-4o-mini",
-        messages,
-        temperature: 0.7,
-        max_tokens: 400,
+        temperature: 0.6,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are CAP’s friendly ops AI. Be concise, proactive, and help users capture leads and keep momentum. If they ask about vendors, instruct them they can say: 'Find {category} in {city}'.",
+          },
+          { role: "user", content: text },
+        ],
+        max_tokens: 320,
       }),
     });
 
     const data = await r.json();
-    if (!r.ok) {
-      console.error("OpenAI error:", data);
-      return res.status(502).json({ error: "OpenAI error", details: data });
-    }
-
-    const reply = data?.choices?.[0]?.message?.content?.trim() || "👍";
-    return res.status(200).json({ reply, mode: "openai" });
+    const reply = data?.choices?.[0]?.message?.content || "👍";
+    return res.status(200).json({ reply });
   } catch (err) {
     console.error("chat error", err);
     return res.status(500).json({ error: "Chat error", details: String(err?.message || err) });
   }
-}
-
-// --- helpers ---
-
-function detectVendorIntent(text) {
-  const t = text.toLowerCase();
-
-  // trigger words
-  const wants = /(find|recommend|suggest|look\s*up|search|nearby|good|best)/.test(t);
-  const vendorish =
-    /(vendor|cater|chef|food truck|bbq|barbecue|bartend|bar service|dj|band|music|photograph|photo|video|venue|space|hall|florist|flowers|planner|rentals|chairs|tables|av|a\/v|lighting|security|clean|staff|waitstaff|cook)/.test(
-      t
-    );
-
-  if (!wants && !vendorish) return null;
-
-  // try to pull location after “in …” or “near …”
-  const locMatch = text.match(/\b(?:in|near|around)\s+([^.,;!?]+)/i);
-  const location = locMatch ? locMatch[1].trim() : undefined;
-
-  // rough category: remove the location tail
-  const stripped = location ? text.replace(locMatch[0], "").trim() : text.trim();
-  const query = stripped
-    .replace(/^(find|recommend|suggest|search|look\s*up)\b/i, "")
-    .replace(/\b(near|around|in)\b.*$/i, "")
-    .trim() || "event vendor";
-
-  return { query, location };
-}
-
-async function searchVendors(query, location) {
-  const apiKey = process.env.GOOGLE_PLACES_KEY;
-  if (!apiKey) return [];
-
-  // Same strategy as /api/vendors, but inline to avoid extra hop
-  const body = { textQuery: query + (location ? ` in ${location}` : "") };
-
-  const url = `https://places.googleapis.com/v1/places:searchText?key=${apiKey}`;
-  const r = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Goog-FieldMask":
-        "places.displayName,places.formattedAddress,places.internationalPhoneNumber,places.websiteUri,places.rating,places.userRatingCount",
-    },
-    body: JSON.stringify(body),
-  });
-
-  const data = await r.json();
-  if (!r.ok) {
-    console.error("Places error:", data);
-    return [];
-  }
-
-  return (data.places || []).map((p) => ({
-    name: p.displayName?.text || "",
-    address: p.formattedAddress || "",
-    phone: p.internationalPhoneNumber || "",
-    website: p.websiteUri || "",
-    rating: p.rating || null,
-    reviews: p.userRatingCount || null,
-  }));
 }
