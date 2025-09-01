@@ -1,79 +1,84 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import { MessageCircle } from "lucide-react"; // fallback icon
 
-export default function HelpAI({ role = "guest", userId = "dev-ben" }) {
+export default function HelpAI({ role, userId }) {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
-  const [thread, setThread] = useState([
-    { role: "assistant", text: "Hey! Ask me anything about Capitalize—or your role." }
-  ]);
-  const endRef = useRef(null);
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [thread, open]);
+  const [messages, setMessages] = useState([]);
 
-  async function send() {
-    const text = input.trim();
-    if (!text || sending) return;
-    setSending(true);
+  async function sendMessage(e) {
+    e.preventDefault();
+    if (!input.trim()) return;
+
+    const userMessage = { role: "user", content: input };
+    setMessages((prev) => [...prev, userMessage]);
     setInput("");
-    setThread(t => [...t, { role: "user", text }]);
+
     try {
-      const res = await fetch("/api/assistant", {
+      const res = await fetch("/api/help", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role, userId, question: text })
+        body: JSON.stringify({ role, userId, text: input }),
       });
       const data = await res.json();
-      setThread(t => [...t, { role: "assistant", text: data.reply || "…" }]);
-    } catch {
-      setThread(t => [...t, { role: "assistant", text: "Sorry—something went wrong." }]);
-    } finally {
-      setSending(false);
+      setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
+    } catch (err) {
+      setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Error connecting to AI." }]);
     }
   }
-  function onKey(e){ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); send(); } }
 
   return (
     <>
+      {/* Floating toggle button */}
       <button
-        onClick={() => setOpen(v => !v)}
-        className="fixed bottom-5 right-5 z-50 h-12 w-12 rounded-full bg-white/10 border border-white/20 backdrop-blur text-white text-xl"
-        title="Help"
+        onClick={() => setOpen(!open)}
+        className="fixed bottom-6 right-6 z-50 rounded-full shadow-lg flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white"
       >
-        ?
+        {/* ChatGPT swirl logo style */}
+        <span className="text-lg">🟢⚪🌀</span>
+        <span className="text-xs font-medium">Powered by OpenAI</span>
       </button>
 
+      {/* Chat window */}
       {open && (
-        <div className="fixed bottom-20 right-5 z-50 w-[22rem] max-h-[70vh] rounded-2xl border border-white/15 bg-black/70 backdrop-blur text-white flex flex-col overflow-hidden">
-          <div className="px-4 py-3 border-b border-white/10 text-sm">
-            Capitalize Assistant <span className="opacity-60">({role})</span>
+        <div className="fixed bottom-20 right-6 w-80 rounded-2xl border border-neutral-800 bg-neutral-950/95 backdrop-blur shadow-xl flex flex-col overflow-hidden z-50">
+          <div className="p-3 border-b border-neutral-800 text-sm font-semibold">
+            AI Helper
           </div>
-          <div className="p-3 space-y-2 overflow-auto">
-            {thread.map((m,i)=>(
-              <div key={i} className={m.role==="assistant" ? "text-sm" : "text-sm text-purple-200 text-right"}>
-                {m.text}
+          <div className="flex-1 p-3 overflow-y-auto space-y-2 text-sm">
+            {messages.length === 0 && (
+              <div className="text-neutral-500 text-center">
+                Ask me anything about CAPITALIZE!
+              </div>
+            )}
+            {messages.map((m, i) => (
+              <div
+                key={i}
+                className={`p-2 rounded-xl ${
+                  m.role === "user"
+                    ? "bg-emerald-600 text-white self-end ml-10"
+                    : "bg-neutral-800 text-neutral-200 self-start mr-10"
+                }`}
+              >
+                {m.content}
               </div>
             ))}
-            <div ref={endRef} />
           </div>
-          <div className="p-3 border-t border-white/10">
-            <textarea
+          <form onSubmit={sendMessage} className="p-2 border-t border-neutral-800 flex gap-2">
+            <input
+              className="flex-1 rounded-xl bg-neutral-900 text-neutral-200 text-sm px-3 py-2 focus:outline-none focus:ring-1 focus:ring-emerald-500"
               value={input}
-              onChange={e=>setInput(e.target.value)}
-              onKeyDown={onKey}
-              placeholder="Ask anything… (Enter to send)"
-              className="w-full rounded-xl bg-white/5 border border-white/10 p-2 text-sm min-h-[44px] focus:outline-none"
+              onChange={(e) => setInput(e.target.value)}
+              placeholder='Ask a question! (e.g. "How do referrals work?", "How do vendors get paid?")'
             />
-            <div className="mt-2 flex justify-end">
-              <button
-                onClick={send}
-                disabled={sending || !input.trim()}
-                className="px-3 py-1.5 rounded-lg bg-white/10 border border-white/20 disabled:opacity-50"
-              >
-                {sending ? "Sending…" : "Send"}
-              </button>
-            </div>
-          </div>
+            <button
+              className="px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-500"
+              type="submit"
+            >
+              Send
+            </button>
+          </form>
         </div>
       )}
     </>
