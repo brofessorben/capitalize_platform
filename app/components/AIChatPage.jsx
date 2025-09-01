@@ -1,186 +1,331 @@
+// app/components/AIChatPage.jsx
 "use client";
+
 import { useEffect, useRef, useState } from "react";
 
-function pick(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
-
-function warmGreeting(role = "guide") {
-  const emojis = ["✨", "🚀", "🧭", "🤝", "🍰", "🎉", "🧠", "⚡️"];
-  const hooks = [
-    "Welcome to your CAPITALIZE cockpit",
-    "Strap in—let’s turn plans into bookings",
-    "Your AI operator is online",
-    "Let’s ship proposals and stack wins",
-  ];
-  const promptsCommon = [
-    `“Draft a vendor intro for a ${pick(["wedding","corporate","non-profit","birthday","festival"])}.”`,
-    `“Is $${pick(["25","40","60","75"])}/pp realistic for ${pick(["80","120","200"])} guests?”`,
-    `“Turn this into a proposal with two tiers + upsells.”`,
-    `“Summarize this host chat and propose my next reply.”`,
-  ];
-  const roleTips = {
-    referrer: [
-      "“Log a referral: host name, date, headcount, budget.”",
-      "“Generate a catchy referral blurb.”",
-      "“What are my rewards so far?”",
-    ],
-    vendor: [
-      "“Draft a proposal (silver/gold) with upsells.”",
-      "“Polish this into an email + SMS follow-up.”",
-      "“Suggest a close-now incentive.”",
-    ],
-    host: [
-      "“Compare these quotes and flag tradeoffs.”",
-      "“Write a confident-but-kind reply.”",
-      "“Make me a day-of timeline.”",
-    ],
-    guide: [],
-  };
-
-  const base =
-    `${pick(emojis)} ${pick(hooks)}.\n\n` +
-    `Try:\n• ${pick(promptsCommon)}\n• ${pick(promptsCommon)}\n` +
-    (roleTips[role]?.length ? `• ${pick(roleTips[role])}\n` : "");
-
-  const refExtra =
-    `\n**Referrers:** include vendor + host details and I’ll handle intros.\n` +
-    `• Vendor: name + phone/email\n` +
-    `• Host: name + phone/email + event date + headcount + budget (if known)\n` +
-    `I’ll draft the intro we settle on and take care of the rest.\n\n` +
-    `Need suggestions now? Type: \`/vendors <what> in <city>\` (e.g., \`/vendors taco catering in Austin\`).`;
-
-  return role === "referrer" ? base + refExtra : base + `\nDrop raw context and I’ll shape next steps.`;
-}
-
-export default function AIChatPage({
-  title = "AI Copilot",
-  sub = "Ask about referrals, proposals, budgets, outreach wording, and more.",
-  badge = "Powered by OpenAI",
-  role = "guide",
-  userId = "demo-user",
-}) {
-  const scrollerRef = useRef(null);
-  const [messages, setMessages] = useState([]);
+export default function AIChatPage({ role = "referrer", header = "" }) {
+  const [messages, setMessages] = useState([
+    {
+      role: "assistant",
+      text: seedGreeting(role),
+      ts: Date.now(),
+    },
+  ]);
   const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const scrollerRef = useRef(null);
 
-  // auto greet on mount
-  useEffect(() => {
-    setMessages([{ role: "assistant", content: warmGreeting(role) }]);
-  }, [role]);
+  // lead-capture panel state
+  const [referrer, setReferrer] = useState({ name: "", email: "" });
+  const [host, setHost] = useState({ name: "", contact: "" });
+  const [vendor, setVendor] = useState({ name: "", contact: "", website: "" });
+  const [notes, setNotes] = useState("");
+  const [intro, setIntro] = useState({ subject: "", email: "", sms: "" });
+  const [drafting, setDrafting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState("");
 
   useEffect(() => {
     const el = scrollerRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
-  async function tryVendorCommand(text) {
-    const m = text.match(/^\/vendors\s+(.+)/i);
-    if (!m) return false;
-    const q = m[1];
-    setMessages((msgs) => [...msgs, { role: "assistant", content: `Searching vendors: ${q} …` }]);
-    try {
-      const res = await fetch(`/api/vendors?query=${encodeURIComponent(q)}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Vendor search failed");
-      const lines = (data.results || []).slice(0, 8).map((v, i) => {
-        const contact = [v.phone, v.website].filter(Boolean).join(" • ");
-        return `${i + 1}. ${v.name}${v.rating ? ` (${v.rating}★)` : ""}\n   ${v.address}${contact ? `\n   ${contact}` : ""}`;
-      });
-      setMessages((msgs) => [
-        ...msgs,
-        { role: "assistant", content: lines.length ? lines.join("\n\n") : "No vendors found (try another query/city)." },
-      ]);
-    } catch (err) {
-      setMessages((msgs) => [
-        ...msgs,
-        { role: "assistant", content: `Sorry—vendor search error: ${String(err?.message || err)}` },
-      ]);
-    }
-    return true;
-  }
-
-  async function sendMessage(e) {
+  async function sendChat(e) {
     e?.preventDefault?.();
     const text = input.trim();
-    if (!text || sending) return;
-
-    if (await tryVendorCommand(text)) {
-      setInput("");
-      return;
-    }
-
-    setSending(true);
+    if (!text || busy) return;
+    setBusy(true);
     setInput("");
-    setMessages((m) => [...m, { role: "user", content: text }]);
+
+    setMessages((m) => [...m, { role: "user", text, ts: Date.now() }]);
 
     try {
-      const res = await fetch("/api/chat", {
+      const r = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          lead_id: `ui-${userId}-${Date.now()}`,
-          sender: role || "guide",
-          text,
-        }),
+        body: JSON.stringify({ text, sender: role }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Chat error");
-      setMessages((m) => [...m, { role: "assistant", content: data.reply || "(no reply)" }]);
+      const data = await r.json();
+      const reply = data?.reply || "👍";
+      setMessages((m) => [...m, { role: "assistant", text: reply, ts: Date.now() }]);
     } catch (err) {
       setMessages((m) => [
         ...m,
-        { role: "assistant", content: `Sorry—something went wrong: ${String(err?.message || err)}` },
+        { role: "assistant", text: "Hmmm, I hit an error. Try again?", ts: Date.now() },
       ]);
     } finally {
-      setSending(false);
+      setBusy(false);
+    }
+  }
+
+  async function draftIntro() {
+    setDrafting(true);
+    setIntro({ subject: "", email: "", sms: "" });
+    setNotice("");
+
+    try {
+      const r = await fetch("/api/draft-intro", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ referrer, host, vendor, notes, role }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error || "Draft error");
+      setIntro({
+        subject: data.subject,
+        email: data.emailBody,
+        sms: data.smsBody,
+      });
+      setNotice("Draft ready. Copy/paste or tweak, then save/send.");
+    } catch (e) {
+      setNotice("Couldn’t draft right now. Add OPENAI_API_KEY to enable smarter drafts.");
+    } finally {
+      setDrafting(false);
+    }
+  }
+
+  async function saveLead() {
+    setSaving(true);
+    setNotice("");
+    try {
+      const r = await fetch("/api/save-lead", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ referrer, host, vendor, notes }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error || "Save failed");
+      setNotice("Saved! You can keep chatting or draft another intro.");
+    } catch (e) {
+      setNotice(
+        "Couldn’t save to DB. If you’re not using Supabase yet, that’s fine—copy your draft and continue."
+      );
+    } finally {
+      setSaving(false);
     }
   }
 
   return (
-    <div className="min-h-[70vh] flex flex-col rounded-2xl border border-neutral-800 bg-neutral-950/80 backdrop-blur">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-800 bg-neutral-900/70">
-        <div>
-          <div className="text-lg font-semibold">{title}</div>
-          <div className="text-xs text-neutral-400">{sub}</div>
+    <div className="min-h-dvh bg-neutral-950 text-neutral-100">
+      {/* Top bar */}
+      <div className="sticky top-0 z-30 border-b border-neutral-900 bg-neutral-950/80 backdrop-blur">
+        <div className="mx-auto max-w-7xl px-6 h-16 flex items-center justify-between">
+          <div className="font-black tracking-tight">{header || headerFor(role)}</div>
+          <div className="text-xs text-neutral-400">Powered by OpenAI · CAP 🜲</div>
         </div>
-        <div className="text-[11px] text-neutral-400">{badge}</div>
       </div>
 
-      <div ref={scrollerRef} className="flex-1 overflow-y-auto p-4 space-y-2">
-        {messages.map((m, i) => (
-          <div
-            key={i}
-            className={
-              m.role === "assistant"
-                ? "bg-neutral-900 border border-neutral-800 rounded-xl p-2 text-sm"
-                : "bg-emerald-600/20 border border-emerald-700 rounded-xl p-2 text-sm"
-            }
-          >
-            {m.content}
+      {/* Main: chat + lead panel */}
+      <div className="mx-auto max-w-7xl px-6 py-6 grid gap-6 lg:grid-cols-[1fr_380px]">
+        {/* Chat */}
+        <div className="rounded-2xl border border-neutral-900 bg-neutral-950/60 overflow-hidden">
+          <div ref={scrollerRef} className="h-[65vh] overflow-y-auto p-4 space-y-3">
+            {messages.map((m, i) => (
+              <Bubble key={i} who={m.role} text={m.text} />
+            ))}
           </div>
-        ))}
-      </div>
-
-      <form onSubmit={sendMessage} className="p-3 border-t border-neutral-800 bg-neutral-950">
-        <textarea
-          rows={3}
-          className="w-full resize-none rounded-xl bg-neutral-900 border border-neutral-800 p-2 text-sm outline-none focus:ring-2 focus:ring-emerald-600"
-          placeholder='Ask a question! e.g., “Draft a 2-tier proposal w/ upsells for 120 guests at $45/pp.”  Tip: /vendors pizza in Denver'
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-        />
-        <div className="mt-2 flex justify-end">
-          <button
-            disabled={sending || !input.trim()}
-            className="px-3 py-1.5 rounded-lg bg-emerald-500 text-black font-semibold disabled:opacity-50"
-          >
-            {sending ? "Thinking…" : "Send"}
-          </button>
+          <form onSubmit={sendChat} className="border-t border-neutral-900 p-3 flex gap-2">
+            <input
+              className="flex-1 bg-neutral-900 border border-neutral-800 rounded-xl px-3 h-11 outline-none focus:ring-2 focus:ring-emerald-500/30"
+              placeholder="Ask anything — e.g., “Find a BBQ caterer in Nashville”"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+            />
+            <button
+              disabled={busy || !input.trim()}
+              className="px-5 h-11 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50"
+            >
+              {busy ? "…" : "Send"}
+            </button>
+          </form>
         </div>
-      </form>
+
+        {/* Lead quick capture */}
+        <div className="rounded-2xl border border-neutral-900 bg-neutral-950/60 p-4 space-y-4">
+          <div className="text-sm font-semibold text-neutral-200">Lead Quick Capture</div>
+
+          <Fieldset label="Referrer">
+            <TwoCol>
+              <Input label="Name" value={referrer.name} onChange={(v) => setReferrer({ ...referrer, name: v })} />
+              <Input label="Email" value={referrer.email} onChange={(v) => setReferrer({ ...referrer, email: v })} />
+            </TwoCol>
+          </Fieldset>
+
+          <Fieldset label="Host">
+            <TwoCol>
+              <Input label="Name" value={host.name} onChange={(v) => setHost({ ...host, name: v })} />
+              <Input
+                label="Phone / Email"
+                value={host.contact}
+                onChange={(v) => setHost({ ...host, contact: v })}
+              />
+            </TwoCol>
+          </Fieldset>
+
+          <Fieldset label="Vendor">
+            <TwoCol>
+              <Input label="Name" value={vendor.name} onChange={(v) => setVendor({ ...vendor, name: v })} />
+              <Input
+                label="Phone / Email"
+                value={vendor.contact}
+                onChange={(v) => setVendor({ ...vendor, contact: v })}
+              />
+            </TwoCol>
+            <Input
+              label="Website (optional)"
+              value={vendor.website}
+              onChange={(v) => setVendor({ ...vendor, website: v })}
+            />
+          </Fieldset>
+
+          <div>
+            <label className="block text-xs text-neutral-400 mb-1">Notes / Context</label>
+            <textarea
+              className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm min-h-[72px] outline-none focus:ring-2 focus:ring-emerald-500/30"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Budget, headcount, date, dietary, vibe…"
+            />
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={draftIntro}
+              disabled={drafting}
+              className="px-4 h-10 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50"
+              type="button"
+            >
+              {drafting ? "Drafting…" : "Draft Intro"}
+            </button>
+            <button
+              onClick={saveLead}
+              disabled={saving}
+              className="px-4 h-10 rounded-xl bg-neutral-800 border border-neutral-700 hover:bg-neutral-700 disabled:opacity-50"
+              type="button"
+            >
+              {saving ? "Saving…" : "Save Lead"}
+            </button>
+          </div>
+
+          {!!notice && <div className="text-xs text-neutral-400">{notice}</div>}
+
+          {!!intro.email && (
+            <div className="space-y-3 pt-2 border-t border-neutral-900">
+              <div className="text-xs text-neutral-400">Intro Drafts</div>
+              <CopyBlock label="Subject" text={intro.subject} />
+              <CopyBlock label="Email" text={intro.email} />
+              <CopyBlock label="SMS" text={intro.sms} />
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
+}
+
+/* ---------- tiny components ---------- */
+function Bubble({ who, text }) {
+  const me = who === "user";
+  return (
+    <div className={`flex ${me ? "justify-end" : "justify-start"}`}>
+      <div
+        className={`max-w-[80%] px-3 py-2 rounded-2xl text-sm border ${
+          me
+            ? "bg-emerald-700 text-white border-emerald-800"
+            : "bg-neutral-900 text-neutral-100 border-neutral-800"
+        }`}
+      >
+        {text}
+      </div>
+    </div>
+  );
+}
+
+function Fieldset({ label, children }) {
+  return (
+    <div>
+      <div className="text-xs text-neutral-400 mb-1">{label}</div>
+      <div className="space-y-2">{children}</div>
+    </div>
+  );
+}
+
+function TwoCol({ children }) {
+  return <div className="grid grid-cols-2 gap-2">{children}</div>;
+}
+
+function Input({ label, value, onChange, placeholder = "" }) {
+  return (
+    <div>
+      <label className="block text-xs text-neutral-400 mb-1">{label}</label>
+      <input
+        className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 h-10 text-sm outline-none focus:ring-2 focus:ring-emerald-500/30"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+      />
+    </div>
+  );
+}
+
+function CopyBlock({ label, text }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div>
+      <div className="text-xs text-neutral-400 mb-1">{label}</div>
+      <div className="relative">
+        <textarea
+          className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm min-h-[120px]"
+          value={text}
+          readOnly
+        />
+        <button
+          onClick={() => {
+            navigator.clipboard?.writeText(text);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1200);
+          }}
+          type="button"
+          className="absolute top-2 right-2 text-xs px-2 h-7 rounded-lg border border-neutral-700 bg-neutral-800 hover:bg-neutral-700"
+        >
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- helpers ---------- */
+function headerFor(role) {
+  if (role === "vendor") return "Vendor Console";
+  if (role === "host") return "Host Console";
+  return "Referrer Console";
+}
+
+function seedGreeting(role) {
+  const intros = [
+    "Yo! I’m your CAPITALIZE co-pilot. Ask me anything or tell me who you’re connecting. I’ll help draft the intro and keep momentum.",
+    "Howdy — I keep things fast & fun. Drop the host + vendor details and I’ll spin up a clean intro and next steps.",
+    "What’s up! Share the people you’re connecting (or ask me to find local vendors) and I’ll do the rest.",
+  ];
+  const pick = intros[Math.floor(Math.random() * intros.length)];
+  if (role === "referrer") {
+    return (
+      pick +
+      " For referrers: include the **vendor name + contact**, plus the **host name + phone/email** and any context (date, headcount, budget). I’ll draft the intro and we’ll take it from there."
+    );
+  }
+  if (role === "host") {
+    return (
+      pick +
+      " For hosts: tell me the **date, headcount, budget, vibe**, and anything special. I’ll help you compare options and draft messages."
+    );
+  }
+  if (role === "vendor") {
+    return (
+      pick +
+      " For vendors: paste a brief offer (price, minimums, what’s included) and I’ll help respond to leads like a pro."
+    );
+  }
+  return pick;
 }
