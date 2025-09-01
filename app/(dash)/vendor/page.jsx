@@ -1,10 +1,17 @@
-"use client";
-
 import BackButton from "../../components/BackButton";
+
+function KPI({ label, value }) {
+  return (
+    <div className="rounded-2xl border p-4">
+      <div className="text-sm text-gray-500">{label}</div>
+      <div className="text-2xl font-bold">{value}</div>
+    </div>
+  );
+}
 
 export default function VendorDash() {
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-8">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Vendor Dashboard</h1>
         <BackButton />
@@ -17,24 +24,26 @@ export default function VendorDash() {
         <KPI label="Payouts" value="$0.00" />
       </div>
 
+      {/* Inbox */}
       <section className="space-y-3">
         <h2 className="font-semibold">Inbox (Leads)</h2>
         <div className="rounded-2xl border p-4 text-sm text-gray-600">
-          No leads yet. You’ll see AI-drafted proposals here ready to send.
+          No leads yet. You’ll see AI-drafted proposals here ready to send. Newest first.
+          Click "Open Chat" to negotiate and send proposals.
+        </div>
+      </section>
+
+      {/* Quick Actions */}
+      <section className="space-y-3">
+        <h2 className="font-semibold">Quick Actions</h2>
+        <div className="flex gap-3">
+          <button className="px-3 py-2 rounded-xl border">Create Sample Menu</button>
+          <button className="px-3 py-2 rounded-xl border">Set Availability</button>
         </div>
       </section>
     </div>
   );
-}
-
-function KPI({ label, value }) {
-  return (
-    <div className="rounded-2xl border p-4">
-      <div className="text-sm text-gray-500">{label}</div>
-      <div className="text-2xl font-bold">{value}</div>
-    </div>
-  );
-}        <div className="rounded-2xl border border-neutral-800 bg-neutral-950/60">
+}}        <div className="rounded-2xl border border-neutral-800 bg-neutral-950/60">
           <table className="w-full text-sm">
             <thead className="text-neutral-400">
               <tr className="border-b border-neutral-900">
