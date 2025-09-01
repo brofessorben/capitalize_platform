@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 
-export default function HelpAI({ role = "generic", userId = "anon" }) {
+export default function HelpAI({ role = "generic", userId = "anon", position = "corner" }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState("");
@@ -65,28 +65,31 @@ export default function HelpAI({ role = "generic", userId = "anon" }) {
     }
   }
 
+  /* ---- positioning logic ---- */
+  const posClasses =
+    position === "dashboard"
+      ? "absolute top-2 left-2"
+      : position === "landing"
+      ? "absolute -left-24 top-10"
+      : "fixed bottom-6 right-6";
+
   return (
     <>
       {/* Floating button */}
       <button
         aria-label="Open AI helper"
         onClick={() => setOpen(true)}
-        className="fixed bottom-6 right-6 z-[1000] flex flex-col items-center justify-center w-20 h-20 rounded-full bg-emerald-500 hover:bg-emerald-400 text-white shadow-2xl animate-pulse-glow relative"
+        className={`${posClasses} z-[1000] flex flex-col items-center justify-center w-20 h-20 rounded-full bg-emerald-500 hover:bg-emerald-400 text-white shadow-2xl animate-pulse-glow relative`}
       >
         <ChatGPTSwirl className="w-10 h-10" />
         <span className="text-[10px] font-semibold mt-1">Ask AI</span>
-        {/* pulsing ring */}
         <span className="absolute inset-0 rounded-full border-4 border-emerald-400 opacity-50 animate-ping"></span>
       </button>
 
       {/* Panel */}
       {open && (
         <div className="fixed inset-0 z-[1001] flex items-end sm:items-center sm:justify-end">
-          <div
-            className="absolute inset-0 bg-black/40"
-            onClick={() => setOpen(false)}
-            aria-hidden
-          />
+          <div className="absolute inset-0 bg-black/40" onClick={() => setOpen(false)} aria-hidden />
           <div className="relative m-3 sm:mr-5 sm:mb-5 w-full sm:w-[420px] rounded-2xl border border-neutral-800 bg-neutral-950 text-neutral-100 shadow-2xl">
             <div className="flex items-center justify-between p-4 border-b border-neutral-800">
               <div className="flex items-center gap-3">
@@ -145,7 +148,6 @@ export default function HelpAI({ role = "generic", userId = "anon" }) {
         </div>
       )}
 
-      {/* extra animation style */}
       <style jsx global>{`
         @keyframes pulse-glow {
           0%, 100% {
