@@ -5,12 +5,6 @@ module.exports = {
     "./components/**/*.{js,ts,jsx,tsx}",
     "./pages/**/*.{js,ts,jsx,tsx}",
   ],
-  theme: {
-    extend: {},
-  },
-  plugins: [
-  (() => {
-    try { return require("@tailwindcss/typography"); }
-    catch { return () => {}; }
-  })(),
-],
+  theme: { extend: {} },
+  plugins: [require("@tailwindcss/typography")],
+};
