@@ -1,20 +1,11 @@
-import AIChatPage from "../../components/AIChatPage";
+// app/(dash)/host/page.jsx
+import AIChatPage from "@/app/components/AIChatPage";
 
 export default function HostDash() {
   return (
-    <AIChatPage
-      role="host"
-      title="Host Command Center"
-      kpis={[
-        { label: "Requests", value: "1" },
-        { label: "Proposals Received", value: "0" },
-        { label: "Booked", value: "0" },
-      ]}
-      quickPrompts={[
-        "Create a new request",
-        "Compare proposals",
-        "What should I ask vendors?",
-      ]}
-    />
+    <div className="max-w-5xl mx-auto p-4">
+      <h1 className="text-2xl font-semibold mb-4">Host Console</h1>
+      <AIChatPage role="host" />
+    </div>
   );
 }
