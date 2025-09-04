@@ -1,13 +1,13 @@
-export default function ChatBubble({ sender, text }) {
-  const isAI = sender === "ai";
+export default function ChatBubble({ role, content }) {
+  const isUser = role === "user";
   return (
-    <div className={`flex ${isAI ? "justify-start" : "justify-end"}`}>
+    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`px-4 py-2 rounded-lg max-w-xs ${
-          isAI ? "bg-gray-300 text-black" : "bg-blue-500 text-white"
+        className={`max-w-xs px-4 py-2 rounded-2xl ${
+          isUser ? "bg-blue-500 text-white" : "bg-gray-200 text-black"
         }`}
       >
-        {text}
+        {content}
       </div>
     </div>
   );
