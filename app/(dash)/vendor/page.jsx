@@ -1,6 +1,10 @@
-"use client";
-import AIChatPage from "../../AIChatPage.jsx";
+import AIChatPage from '../../components/AIChatPage';
 
 export default function VendorDash() {
-  return <AIChatPage role="vendor" header="Vendor Console" />;
+  return (
+    <div className="p-6">
+      <h1 className="text-2xl font-bold mb-4">Vendor Dashboard</h1>
+      <AIChatPage />
+    </div>
+  );
 }
