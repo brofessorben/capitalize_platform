@@ -1,6 +1,0 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-/* Optional nice typography spacing */
-.prose { max-width: 72ch; }
