@@ -1,167 +1,96 @@
 // pages/api/chat.js
-// Minimal, stable handler: tries Google Places (New) first; falls back to OpenAI.
-// No fancy imports; uses built-in fetch supported by Next.js API routes.
-
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const MAPS_KEY = process.env.GOOGLE_MAPS_API_KEY;
-
-// very small city center map for bias; expand later
-const CITY_CENTER = {
-  nashville: { lat: 36.1627, lng: -86.7816, radiusMeters: 45000 },
-  austin: { lat: 30.2672, lng: -97.7431, radiusMeters: 45000 },
-  atlanta: { lat: 33.749, lng: -84.388, radiusMeters: 45000 },
-  miami: { lat: 25.7617, lng: -80.1918, radiusMeters: 45000 },
-  chicago: { lat: 41.8781, lng: -87.6298, radiusMeters: 50000 },
-};
-
-function parseSearch(text) {
-  if (!text) return null;
-  const lowered = String(text).toLowerCase().trim();
-
-  // patterns: "find bbq caterer in nashville", "find taco trucks near austin", "find wedding florist"
-  const p1 = lowered.match(/^\s*find\s+(.+?)\s+(?:in|near)\s+([a-z\s]+)\s*$/i);
-  const p2 = lowered.match(/^\s*find\s+(.+?)\s*$/i);
-
-  if (p1) {
-    return {
-      query: p1[1].trim(),
-      city: p1[2].replace(/[^a-z\s]/g, "").trim(),
-    };
-  }
-  if (p2) {
-    return { query: p2[1].trim(), city: "" };
-  }
-  return null;
-}
-
-async function placesSearchText({ query, city }) {
-  if (!MAPS_KEY) throw new Error("GOOGLE_MAPS_API_KEY not set");
-
-  // pick bias center
-  let bias = CITY_CENTER.nashville;
-  if (city && CITY_CENTER[city.toLowerCase()]) bias = CITY_CENTER[city.toLowerCase()];
-
-  const payload = {
-    textQuery: query + (city ? ` in ${city}` : ""),
-    languageCode: "en",
-    maxResultCount: 8,
-    locationBias: {
-      circle: {
-        center: { latitude: bias.lat, longitude: bias.lng },
-        radius: bias.radiusMeters || 45000,
-      },
-    },
-  };
-
-  const resp = await fetch("https://places.googleapis.com/v1/places:searchText", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Goog-Api-Key": MAPS_KEY,
-      "X-Goog-FieldMask":
-        "places.id,places.displayName,places.formattedAddress,places.primaryType,places.rating,places.userRatingCount,places.websiteUri,places.internationalPhoneNumber",
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const data = await resp.json();
-  if (!resp.ok) {
-    console.error("Places API error", data);
-    throw new Error("Places API error");
-  }
-
-  const items = (data.places || []).map((p) => ({
-    id: p.id,
-    name: p.displayName?.text || "Unknown",
-    address: p.formattedAddress || "",
-    type: p.primaryType || "",
-    rating: p.rating || null,
-    reviews: p.userRatingCount || null,
-    phone: p.internationalPhoneNumber || "",
-    website: p.websiteUri || "",
-  }));
-
-  return items;
-}
-
+/**
+ * Smarter chat endpoint:
+ * - Strong system prompt (persona + formatting rules)
+ * - Returns BOTH nicely formatted text and structured leadHints
+ * - Works with OpenAI API via fetch; uses env OPENAI_API_KEY
+ */
 export default async function handler(req, res) {
   if (req.method !== "POST") {
-    res.setHeader("Allow", "POST");
-    return res.status(405).json({ error: "Method not allowed" });
+    res.status(405).json({ error: "Method not allowed" });
+    return;
   }
 
   try {
-    const body = req.body || {};
-    const text = String(body.text || "").trim();
+    const { messages = [], style = "" } = await req.json?.() || req.body || {};
 
-    // 1) Try vendor search
-    const parsed = parseSearch(text);
-    if (parsed?.query) {
-      try {
-        const vendors = await placesSearchText(parsed);
-        if (vendors.length > 0) {
-          const lines = vendors.map((v, i) => {
-            const bits = [
-              `**${i + 1}. ${v.name}**`,
-              v.address && `• ${v.address}`,
-              v.phone && `• ${v.phone}`,
-              v.website && `• ${v.website}`,
-              v.rating && `• ⭐ ${v.rating} (${v.reviews || 0})`,
-            ].filter(Boolean);
-            return bits.join("  \n");
-          });
+    const system = [
+      "You are CAPITALIZE's co-pilot—friendly, fast, and practical.",
+      "Primary job: help referrers, vendors, and hosts move deals forward.",
+      "You can also answer general questions if asked—briefly and clearly.",
+      "",
+      "FORMATTING:",
+      "• Default to short paragraphs.",
+      "• Use **bold** micro-headings when helpful.",
+      "• Use bullet lists for steps, requirements, or options.",
+      "• No numbered lists unless ordering matters.",
+      "",
+      "BEHAVIOR:",
+      "• If user pastes event details, infer missing pieces and suggest next steps.",
+      "• If a message contains vendor/host/referrer info, reflect it back clearly.",
+      "• Be concise. No fluff. No roleplay.",
+    ].join("\n");
 
-          return res.status(200).json({
-            reply:
-              `Here are options for **${parsed.query}**${
-                parsed.city ? ` in **${parsed.city}**` : ""
-              }:\n\n${lines.join("\n\n")}\n\nReply with a number to use it.`,
-          });
-        }
+    // Ask the model to produce BOTH nice text and a small JSON with lead fields.
+    const userPrompt = [
+      "You will respond in two parts:",
+      "1) A helpful, well-formatted answer (Markdown).",
+      "2) A compact JSON block named leadHints with any fields you can infer:",
+      `   { "referrerName":"", "referrerEmail":"", "hostName":"", "hostContact":"", "vendorName":"", "vendorContact":"", "website":"", "notes":"" }`,
+      "Only include fields you are reasonably confident about. If unknown, omit them.",
+      style ? `STYLE HINT: ${style}` : "",
+      "",
+      "User messages below:"
+    ].join("\n");
 
-        return res
-          .status(200)
-          .json({ reply: `I tried **${parsed.query}**${parsed.city ? ` in ${parsed.city}` : ""} but didn’t find solid matches. Try a nearby city or broader term?` });
-      } catch (e) {
-        console.error("Places search failed, falling back to chat:", e);
-        // fallthrough to chat
-      }
-    }
-
-    // 2) General chat fallback
-    if (!OPENAI_API_KEY) {
-      return res.status(200).json({
-        reply:
-          "Ask me to “Find a {category} in {city}” (e.g., “Find a BBQ caterer in Nashville”), or paste vendor + host contact and I’ll draft the intro.",
-      });
-    }
+    const openAIMessages = [
+      { role: "system", content: system },
+      { role: "user", content: userPrompt },
+      ...messages.map(m => ({
+        role: m.role === "assistant" ? "assistant" : "user",
+        content: m.text || m.content || ""
+      })),
+    ];
 
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
+        "content-type": "application/json",
+        "authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
         model: "gpt-4o-mini",
         temperature: 0.6,
-        max_tokens: 320,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are CAP’s friendly ops AI. Be concise, proactive, and help users capture leads. If they want vendors, tell them they can say: 'Find {category} in {city}'.",
-          },
-          { role: "user", content: text },
-        ],
+        messages: openAIMessages,
       }),
     });
 
+    if (!r.ok) {
+      const err = await r.text();
+      res.status(500).json({ error: "Upstream error", detail: err });
+      return;
+    }
+
     const data = await r.json();
-    const reply = data?.choices?.[0]?.message?.content || "👍";
-    return res.status(200).json({ reply });
-  } catch (err) {
-    console.error("chat error:", err);
-    return res.status(500).json({ error: "Chat error", details: String(err?.message || err) });
+    const raw = data?.choices?.[0]?.message?.content || "Sorry — I didn’t catch that.";
+
+    // Split out the JSON block if present
+    let text = raw;
+    let leadHints = {};
+    const jsonMatch = raw.match(/```json([\s\S]*?)```/i) || raw.match(/\{[\s\S]*\}$/);
+    if (jsonMatch) {
+      const block = Array.isArray(jsonMatch) ? jsonMatch[1] || jsonMatch[0] : "";
+      try {
+        const parsed = JSON.parse(block.trim());
+        if (parsed && typeof parsed === "object") {
+          leadHints = parsed;
+          text = raw.replace(jsonMatch[0], "").trim();
+        }
+      } catch {}
+    }
+
+    res.status(200).json({ text, leadHints });
+  } catch (e) {
+    res.status(500).json({ error: "Server error", detail: String(e) });
   }
 }
