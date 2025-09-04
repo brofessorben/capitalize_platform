@@ -3,50 +3,78 @@
 import { useState } from "react";
 import ChatBubble from "./ChatBubble";
 
-/**
- * FINAL chat page component used by all three dashboards.
- * Renders proper paragraphs, headings, and bullets via ChatBubble.
- */
-export default function AIChatPage({ header = "Console" }) {
+const seed = {
+  referrer: [
+    "### Referrer Console\n",
+    "Drop who you’re connecting and any context. I’ll draft a clean intro and keep momentum.\n",
+    "- **Vendor**: name + contact\n",
+    "- **Host**: name + phone/email\n",
+    "- **Context**: date, headcount, budget, notes\n",
+    "\nI’ll return a message you can copy/paste, plus next steps."
+  ].join("\n"),
+  vendor: [
+    "### Vendor Console\n",
+    "Tell me the lead details and what you offer. I’ll prep a tight reply and surface gaps.\n",
+    "- **Offer**: packages, min spend, travel fees\n",
+    "- **Availability**: dates/times\n",
+    "- **Questions**: missing info I should ask for\n",
+    "\nI’ll format a professional response for the host/referrer."
+  ].join("\n"),
+  host: [
+    "### Host Console\n",
+    "Tell me what you’re planning. I’ll gather quotes and coordinate intros.\n",
+    "- **Event**: type, date, headcount\n",
+    "- **Needs**: vendors, budget ranges\n",
+    "- **Preferences**: vibe, must-haves\n",
+    "\nI’ll turn this into requests vendors can instantly act on."
+  ].join("\n"),
+};
+
+async function callApi(messages, role) {
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages, role }),
+    });
+    if (!res.ok) throw new Error("bad status");
+    const data = await res.json();
+    // expect { content: string } or similar
+    return data.content || "I’m ready. Share details and I’ll draft the next message.";
+  } catch {
+    // fallback canned reply with formatting
+    return [
+      "### Got it",
+      "",
+      "Here’s how I’ll proceed:",
+      "- Capture the details",
+      "- Draft a concise message",
+      "- Keep the momentum between parties",
+      "",
+      "**Next step:** paste the specifics and I’ll tailor it."
+    ].join("\n");
+  }
+}
+
+export default function AIChatPage({ role = "referrer", header = "Console" }) {
   const [messages, setMessages] = useState([
-    {
-      role: "ai",
-      content:
-        "### Welcome\n\nAsk me anything about your active or pending gig.\n\n- I can format with **headings**\n- I can make *bulleted lists*\n- And clean paragraphs",
-    },
+    { role: "ai", content: seed[role] || seed.referrer },
   ]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
 
   async function handleSend() {
-    if (!input.trim() || busy) return;
+    const text = input.trim();
+    if (!text || busy) return;
 
-    const userMsg = { role: "user", content: input.trim() };
-    setMessages((m) => [...m, userMsg]);
+    const next = [...messages, { role: "user", content: text }];
+    setMessages(next);
     setInput("");
     setBusy(true);
 
-    try {
-      // If you have an API, call it here. For now, echo with nice formatting.
-      const fakeReply = [
-        "### Got it",
-        "",
-        "Here’s how I’ll proceed:",
-        "- Capture the details",
-        "- Draft an intro",
-        "- Keep the momentum",
-        "",
-        "**Next step:** paste a short description and I’ll turn it into a message.",
-      ].join("\n");
-      setMessages((m) => [...m, { role: "ai", content: fakeReply }]);
-    } catch {
-      setMessages((m) => [
-        ...m,
-        { role: "ai", content: "### Error\n\nCouldn’t reach the AI service." },
-      ]);
-    } finally {
-      setBusy(false);
-    }
+    const reply = await callApi(next, role);
+    setMessages((m) => [...m, { role: "ai", content: reply }]);
+    setBusy(false);
   }
 
   return (
@@ -55,7 +83,7 @@ export default function AIChatPage({ header = "Console" }) {
 
       <div className="space-y-3 mb-4">
         {messages.map((m, i) => (
-          <ChatBubble key={i} role={m.role} content={m.content} />
+          <ChatBubble key={i} role={m.role === "user" ? "user" : "ai"} content={m.content} />
         ))}
       </div>
 
