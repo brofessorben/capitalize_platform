@@ -2,12 +2,5 @@
 @tailwind components;
 @tailwind utilities;
 
-/* sensible dark defaults */
-:root { color-scheme: dark; }
-html, body, #__next { height: 100%; }
-body {
-  background: #000;
-  color: #e5e7eb; /* neutral-200 */
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
+/* Optional nice typography spacing */
+.prose { max-width: 72ch; }
