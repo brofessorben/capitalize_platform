@@ -1,29 +1,28 @@
 "use client";
 
-/**
- * Tiny Markdown -> HTML (no libs):
- * - ###, ##, # headings
- * - Bulleted lists (- item)
- * - **bold**, *italic*
- * - Blank lines = new paragraphs
- */
-function escapeHtml(s) {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+type Role = "user" | "ai" | "assistant" | "system";
+
+interface ChatBubbleProps {
+  role: Role;
+  content: string;
 }
 
-function mdInline(html) {
-  // bold then italic
-  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+/** Escape HTML */
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** Minimal inline markdown: **bold**, *italic* */
+function mdInline(s: string): string {
+  let html = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
   return html;
 }
 
-function mdToHtml(md) {
+/** Tiny Markdown -> HTML (headings, lists, paragraphs) */
+function mdToHtml(md: string): string {
   const lines = md.replace(/\r\n?/g, "\n").split("\n");
-  let out = [];
+  const out: string[] = [];        // IMPORTANT: typed array fixes the error
   let inList = false;
 
   const flushList = () => {
@@ -33,7 +32,7 @@ function mdToHtml(md) {
     }
   };
 
-  for (let raw of lines) {
+  for (const raw of lines) {
     const line = raw.trimRight();
 
     // Headings
@@ -53,17 +52,17 @@ function mdToHtml(md) {
       continue;
     }
 
-    // List items (- item)
+    // Bulleted list (- item)
     if (/^-\s+/.test(line)) {
       if (!inList) {
-        out.push("<ul class=\"list-disc pl-5 space-y-1\">");
+        out.push('<ul class="list-disc pl-5 space-y-1">');
         inList = true;
       }
       out.push(`<li>${mdInline(escapeHtml(line.replace(/^-\s+/, "")))}</li>`);
       continue;
     }
 
-    // Blank line => paragraph break
+    // Blank line -> paragraph break
     if (line.trim() === "") {
       flushList();
       out.push("<p></p>");
@@ -74,14 +73,12 @@ function mdToHtml(md) {
     flushList();
     out.push(`<p>${mdInline(escapeHtml(line))}</p>`);
   }
-  flushList();
 
-  // Collapse consecutive empty <p> tags
-  const html = out.join("\n").replace(/(<p><\/p>\s*)+/g, "<p></p>");
-  return html;
+  flushList();
+  return out.join("\n").replace(/(<p><\/p>\s*)+/g, "<p></p>");
 }
 
-export default function ChatBubble({ role, content }) {
+export default function ChatBubble({ role, content }: ChatBubbleProps) {
   const isUser = role === "user";
   const html = mdToHtml(content || "");
 
