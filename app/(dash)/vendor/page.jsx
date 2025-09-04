@@ -1,11 +1,11 @@
 import AIChatPage from "../../components/AIChatPage";
 
-export const metadata = { title: "Vendor Dashboard" };
+export const metadata = { title: "Host Dashboard" };
 
-export default function VendorDash() {
+export default function HostDash() {
   return (
     <div className="min-h-screen p-6 bg-neutral-900">
-      <AIChatPage role="vendor" header="Vendor Console" />
+      <AIChatPage role="host" header="Host Console" />
     </div>
   );
 }
