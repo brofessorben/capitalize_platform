@@ -1,5 +1,5 @@
 // app/(dash)/vendor/page.jsx
-import AIChatPage from "@/app/components/AIChatPage";
+import AIChatPage from "../../components/AIChatPage";
 
 export default function VendorDash() {
   return (
