@@ -1,4 +1,5 @@
-import AIChatPage from "../../components/AIChatPage";
+- import AIChatPage from '../../components/AIChatPage'
++ import AIChatPage from '../../components/AIChatPage.jsx'
 
 export default function HostDash() {
   return (
