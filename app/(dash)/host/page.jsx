@@ -1,5 +1,5 @@
 // app/(dash)/host/page.jsx
-import AIChatPage from "@/app/components/AIChatPage";
+import AIChatPage from "../../components/AIChatPage";
 
 export default function HostDash() {
   return (
