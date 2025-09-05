@@ -1,6 +1,6 @@
 "use client";
-import AIChatPage from "@/app/components/aichatpage";
+import AIChatPage from "../../components/aichatpage";
 
-export default function Page() {
+export default function VendorPage() {
   return <AIChatPage role="vendor" header="Vendor Console" />;
 }
