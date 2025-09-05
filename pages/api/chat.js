@@ -1,13 +1,25 @@
-// ---- helpers ---------------------------------------------------------------
+// pages/api/chat.js
+import OpenAI from "openai";
+import { systemPrompt } from "@/lib/systemPrompt"; // named export
+
+export const config = {
+  api: { bodyParser: true },
+};
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+// ───────────────────────── helpers ─────────────────────────
 
 function parseCityFromQuery(q) {
-  // crude city extractor: “… in Nashville”, “… near Nashville, TN”
+  // “… in Nashville”, “… near Nashville, TN”
   const m = q.match(/\b(?:in|near)\s+([A-Za-z .'-]+?)(?:,?\s*[A-Z]{2})?\b/i);
   return m ? m[1].trim() : null;
 }
 
 function isLocalIntent(q) {
-  const s = q.toLowerCase();
+  const s = (q || "").toLowerCase();
   return (
     /\b(find|near|near me|closest|best)\b/.test(s) ||
     /\b(bbq|barbecue|truck|food truck|cater|caterer|vendor|restaurant|bar|venue|coffee|bakery|pizza|taco|dessert|pop-up)\b/.test(s) ||
@@ -48,7 +60,7 @@ async function doWebSearch(query) {
   ].join("\n");
 }
 
-// NEW: SerpAPI Google Local (map pack)
+// SerpAPI Google Local (map pack)
 async function doLocalSearch(query) {
   const key = process.env.SERPAPI_KEY;
   if (!key) throw new Error("SERPAPI_KEY missing");
@@ -59,10 +71,8 @@ async function doLocalSearch(query) {
   url.searchParams.set("hl", "en");
   url.searchParams.set("gl", "us");
   url.searchParams.set("num", "10");
-
   const city = parseCityFromQuery(query);
-  if (city) url.searchParams.set("location", city); // helps target the city
-
+  if (city) url.searchParams.set("location", city);
   url.searchParams.set("api_key", key);
 
   const r = await fetch(url, { next: { revalidate: 120 } });
@@ -78,17 +88,16 @@ async function doLocalSearch(query) {
     website: p.website,
     place_id: p.place_id,
   }));
-
   if (!results.length) return null; // let caller try Places fallback
 
   const lines = results.map((p, i) => {
     const rating =
       p.rating && p.total_ratings ? ` — ${p.rating}★ (${p.total_ratings})` : "";
     const site = p.website ? `  \n   ${p.website}` : "";
+    const phone = p.phone ? `  \n   ${p.phone}` : "";
     const mapLink = p.place_id
       ? `  \n   https://www.google.com/maps/place/?q=place_id:${p.place_id}`
       : "";
-    const phone = p.phone ? `  \n   ${p.phone}` : "";
     return `${i + 1}. **${p.name}**${rating}  \n   ${p.address ?? ""}${phone}${site}${mapLink}`;
   });
 
@@ -118,7 +127,6 @@ async function doNewsSearch(query) {
     date: r.date,
     snippet: r.snippet,
   }));
-
   if (!results.length) return "_No recent articles found._";
 
   return [
@@ -137,7 +145,9 @@ async function doMapsSearch(query) {
   const key = process.env.GOOGLE_PLACES_KEY;
   if (!key) throw new Error("GOOGLE_PLACES_KEY missing");
 
-  const url = new URL("https://maps.googleapis.com/maps/api/place/textsearch/json");
+  const url = new URL(
+    "https://maps.googleapis.com/maps/api/place/textsearch/json"
+  );
   url.searchParams.set("query", query);
   url.searchParams.set("key", key);
 
@@ -152,20 +162,19 @@ async function doMapsSearch(query) {
     total_ratings: p.user_ratings_total,
     place_id: p.place_id,
   }));
-
   if (!results.length) return "_No places found._";
 
   const lines = results.map((p, i) => {
-    const mapLink = `https://www.google.com/maps/place/?q=place_id:${p.place_id}`;
     const rating =
       p.rating && p.total_ratings ? ` — ${p.rating}★ (${p.total_ratings})` : "";
+    const mapLink = `https://www.google.com/maps/place/?q=place_id:${p.place_id}`;
     return `${i + 1}. **${p.name}**${rating}  \n   ${p.address}  \n   ${mapLink}`;
   });
 
   return ["**Google Maps results for:** " + query, "", ...lines].join("\n");
 }
 
-// ---- main handler routing tweak -------------------------------------------
+// ───────────────────────── handler ─────────────────────────
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -177,27 +186,65 @@ export default async function handler(req, res) {
     const last = messages[messages.length - 1];
     const userText = (last && last.content) || "";
 
-    // Slash commands (unchanged)
+    // Slash commands
     const slash = userText.trim().match(/^\/(search|news|maps|local)\s+(.+)/i);
     if (slash) {
       const [, cmd, query] = slash;
-      if (cmd === "search") return res.status(200).json({ reply: await doWebSearch(query) });
-      if (cmd === "news")   return res.status(200).json({ reply: await doNewsSearch(query) });
-      if (cmd === "maps")   return res.status(200).json({ reply: await doMapsSearch(query) });
+      if (cmd === "search") {
+        return res.status(200).json({ reply: await doWebSearch(query) });
+      }
+      if (cmd === "news") {
+        return res.status(200).json({ reply: await doNewsSearch(query) });
+      }
+      if (cmd === "maps") {
+        return res.status(200).json({ reply: await doMapsSearch(query) });
+      }
       if (cmd === "local") {
         const local = await doLocalSearch(query);
         if (local) return res.status(200).json({ reply: local });
-        return res.status(200).json({ reply: await doMapsSearch(query) }); // fallback
+        return res.status(200).json({ reply: await doMapsSearch(query) });
       }
     }
 
-    // NEW: auto-local intent without slash
+    // Auto local intent without slash
     if (isLocalIntent(userText)) {
       const local = await doLocalSearch(userText);
       if (local) return res.status(200).json({ reply: local });
-      // fallback to Places
       return res.status(200).json({ reply: await doMapsSearch(userText) });
     }
 
-    // ... then your existing OpenAI chat logic (unchanged)
-    // (keep your systemPrompt + OpenAI call here)
+    // Normal chat -> OpenAI
+    const sys = [
+      systemPrompt,
+      "",
+      `User role: ${role}`,
+      "When giving details about a specific business, only summarize what came from live search results (if any) and include short source links. If you didn’t search, say so.",
+      "Keep responses crisp, structured (use headings & bullets when useful), and action-forward.",
+    ].join("\n");
+
+    const chat = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      temperature: 0.3,
+      messages: [
+        { role: "system", content: sys },
+        ...messages.map((m) => ({
+          role:
+            m.role === "assistant" || m.role === "ai" ? "assistant" : m.role,
+          content: String(m.content ?? ""),
+        })),
+      ],
+    });
+
+    const reply =
+      chat.choices?.[0]?.message?.content?.trim() ||
+      "I’m here—share details and I’ll draft the next message.";
+
+    return res.status(200).json({ reply });
+  } catch (err) {
+    console.error("api/chat error:", err);
+    return res.status(200).json({
+      reply:
+        "_Couldn’t reach the server. Try again in a moment. If this keeps happening, ping the team._",
+    });
+  }
+}
