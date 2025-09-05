@@ -1,33 +1,47 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import ChatBubble from "@/app/components/ChatBubble";
-import LeadQuickCapture from "@/app/components/LeadQuickCapture";
+import ChatBubble from "./ChatBubble";
+import LeadQuickCapture from "./LeadQuickCapture";
 
 const seeds = {
   referrer:
-    "Yo! I’m your CAPITALIZE co-pilot. Drop the **vendor** + **host** details (names, contact, date, headcount, budget, notes). I’ll draft the intro and keep momentum.\n\n**Commands:**\n- `/search query` web search\n- `/news query` news search\n- `/maps query` Google Maps/Places\n\nEnter = newline • Cmd/Ctrl+Enter = Send",
+    "Yo! I’m your CAPITALIZE co-pilot. Drop in vendor + host details (names, contacts, event info) and I’ll draft the intro for you.",
   vendor:
-    "Vendor console ready. Paste the lead details (event, date, headcount, budget, location, notes) and I’ll draft a clean reply/proposal you can send.",
+    "Welcome to your vendor console. Paste event details (date, headcount, budget, location, notes) and I’ll draft a clean proposal you can send.",
   host:
-    "Host console ready. Tell me the event (date, headcount, budget, location, vibe). I’ll generate a clean vendor request or proposal.",
+    "Welcome! Tell me what you’re planning (event, date, headcount, budget, location, vibe) and I’ll generate a vendor request or proposal.",
 };
 
+async function callApi(messages, role) {
+  const res = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages, role }),
+  });
+  if (!res.ok) throw new Error("bad status");
+  const data = await res.json();
+  return data.reply || "I’m ready — share details and I’ll draft the next step.";
+}
+
 export default function AIChatPage({ role = "referrer", header = "Referrer Console" }) {
-  const [messages, setMessages] = useState([{ role: "ai", content: seeds[role] || seeds.referrer }]);
+  const [messages, setMessages] = useState([
+    { role: "ai", content: seeds[role] || seeds.referrer },
+  ]);
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState("");
+
   const taRef = useRef(null);
 
-  // auto-grow textarea up to 240px
+  // Grow textarea with content
   useEffect(() => {
     const el = taRef.current;
     if (!el) return;
     el.style.height = "0px";
-    el.style.height = Math.min(el.scrollHeight, 240) + "px";
+    el.style.height = Math.min(el.scrollHeight, 240) + "px"; // cap height
   }, [input]);
 
-  function push(role, content) {
+  function pushMsg(role, content) {
     setMessages((m) => [...m, { role, content }]);
   }
 
@@ -35,51 +49,51 @@ export default function AIChatPage({ role = "referrer", header = "Referrer Conso
     const text = input.trim();
     if (!text || busy) return;
     setInput("");
-    push("user", text);
+    pushMsg("user", text);
     setBusy(true);
 
     try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: [...messages, { role: "user", content: text }], role }),
-      });
-      const data = await res.json();
-      push("ai", data.reply || "I’m here—share details and I’ll draft the next message.");
-    } catch {
-      push("ai", "_Couldn’t reach the server. Try again in a moment._");
+      const reply = await callApi([...messages, { role: "user", content: text }], role);
+      pushMsg("ai", reply);
+    } catch (err) {
+      pushMsg(
+        "ai",
+        "_Couldn’t reach the server. Paste your event details (event / date / headcount / budget / location / notes) and I’ll structure a clean message._"
+      );
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div className="min-h-[80vh] w-full mx-auto max-w-4xl p-4 md:p-6 rounded-2xl bg-neutral-900 text-neutral-100">
-      {/* Header */}
-      <div className="text-2xl font-semibold mb-4">{header}</div>
+    <div className="mx-auto max-w-4xl p-4 md:p-6 bg-neutral-900 text-white rounded-xl shadow-lg">
+      <div className="text-xl font-semibold mb-4">{header}</div>
 
-      {/* Chat stream */}
-      <div className="space-y-3 mb-4">
+      <div className="space-y-3 mb-4 max-h-[60vh] overflow-y-auto pr-2">
         {messages.map((m, i) => (
-          <ChatBubble key={i} role={m.role === "user" ? "user" : "ai"} content={m.content} />
+          <ChatBubble
+            key={i}
+            role={m.role === "user" ? "user" : "ai"}
+            content={m.content}
+          />
         ))}
         {busy && <ChatBubble role="ai" content="_Typing…_" />}
       </div>
 
-      {/* Composer */}
-      <div className="flex items-end gap-2 sticky bottom-4">
+      <div className="flex items-end gap-2">
         <textarea
           ref={taRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
+            // ENTER inserts newline; Ctrl/Cmd+Enter sends
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
               e.preventDefault();
               send();
             }
           }}
-          placeholder="Type your message… (Cmd/Ctrl+Enter to send)"
-          className="flex-1 min-h-[44px] max-h-[240px] resize-none rounded-xl bg-neutral-800 text-neutral-100 placeholder-neutral-400 border border-neutral-700 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+          placeholder="Type your message… (/search, /news, /maps supported)"
+          className="flex-1 min-h-[44px] max-h-[240px] resize-none rounded-xl bg-neutral-800 text-white placeholder-neutral-400 border border-neutral-700 px-3 py-2"
         />
         <button
           onClick={send}
@@ -91,16 +105,14 @@ export default function AIChatPage({ role = "referrer", header = "Referrer Conso
         </button>
       </div>
 
-      {/* Lead form (referrer only) */}
+      {/* Referrer quick-capture form under chat */}
       {role === "referrer" && (
-        <div className="mt-6">
-          <LeadQuickCapture
-            onDraft={(lines) => {
-              push("user", "(Draft intro)");
-              push("ai", lines.join("\n"));
-            }}
-          />
-        </div>
+        <LeadQuickCapture
+          onDraft={(lines) => {
+            pushMsg("user", "(Draft intro)");
+            pushMsg("ai", lines.join("\n"));
+          }}
+        />
       )}
     </div>
   );
