@@ -1,121 +1,172 @@
 // pages/api/chat.js
+/* eslint-disable no-console */
+
+import systemPrompt from "../../lib/systemPrompt";
+
+// Build a reliable absolute origin on Vercel (works locally, too)
+function getOrigin(req) {
+  // Prefer Vercel's injected URL (e.g. my-app.vercel.app)
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  // Fallback to the host header (local dev)
+  const host = req?.headers?.host || "localhost:3000";
+  const proto = (req?.headers?.["x-forwarded-proto"] || "").includes("https")
+    ? "https"
+    : "http";
+  return `${proto}://${host}`;
+}
+
+// POST helper with sane defaults
+async function postJSON(url, payload) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 20000); // 20s safety timeout
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload || {}),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`HTTP ${res.status} ${res.statusText} — ${text}`);
+    }
+    return await res.json();
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+function formatSearchResults(json, sourceLabel = "web") {
+  const items = Array.isArray(json?.results) ? json.results : [];
+  if (!items.length) {
+    return "_No results found. Try a more specific query._";
+  }
+  // Markdown list with title → link + snippet
+  const lines = items.slice(0, 8).map((r, i) => {
+    const title = r.title || r.name || r.url || "Result";
+    const url = r.url || r.link || r.website || "";
+    const snippet = r.snippet || r.description || r.formatted_address || r.vicinity || "";
+    return `**${i + 1}. [${title}](${url})**\n${snippet ? `${snippet}\n` : ""}`;
+  });
+  return [
+    `### Top ${sourceLabel} results`,
+    "",
+    ...lines,
+    "",
+    "_Tip: ask me to summarize or compare any of these._",
+  ].join("\n");
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
-    return res.status(200).json({ ok: true });
+    res.setHeader("Allow", ["POST"]);
+    return res.status(405).json({ error: "Method Not Allowed" });
   }
 
   try {
-    const { messages = [], role } = req.body || {};
-    const last = messages[messages.length - 1] || {};
-    const text = (last.content || "").trim();
+    const { messages = [], role = "referrer" } = req.body || {};
+    const last = messages[messages.length - 1];
+    const userText = (last?.content || "").trim();
 
-    // Build absolute origin so server-to-server fetches work on Vercel
-    const proto = (req.headers["x-forwarded-proto"] || "https");
-    const host = req.headers.host;
-    const origin = `${proto}://${host}`;
+    const origin = getOrigin(req);
 
-    // 1) Explicit commands
-    if (text.startsWith("/search") || text.startsWith("/news")) {
-      const q = text.replace(/^\/(search|news)/, "").trim();
-      const mode = text.startsWith("/news") ? "news" : "web";
-      const data = await callInternal(`${origin}/api/search-web`, { q, mode });
-      return res.status(200).json({ reply: formatWeb(data?.items) });
-    }
+    // ---------------------------
+    // Slash commands
+    // ---------------------------
+    // /search query → web search via /api/search-web
+    // /news query   → news search via /api/search-web?type=news
+    // /maps query   → Google Places via /api/maps-search
+    const slash = userText.startsWith("/")
+      ? userText.slice(1).split(/\s+/, 1)[0].toLowerCase()
+      : null;
 
-    if (text.startsWith("/maps")) {
-      const q = text.replace(/^\/maps/, "").trim();
-      const data = await callInternal(`${origin}/api/maps-search`, { q, region: "us" });
-      return res.status(200).json({ reply: formatMaps(data?.items) });
-    }
-
-    // 2) Heuristic auto-search for web-y questions
-    if (looksLikeWebQuestion(text)) {
-      const data = await callInternal(`${origin}/api/search-web`, { q: text, mode: "web" });
-      const reply = formatWeb(data?.items);
-      if (reply && reply !== "No results found.") {
-        return res.status(200).json({ reply });
+    if (slash === "search" || slash === "news") {
+      const query = userText.replace(/^\/(search|news)\s*/i, "").trim();
+      if (!query) {
+        return res.json({
+          content:
+            "Give me something to look up. Example:\n\n`/search best taco trucks in Nashville`",
+        });
       }
+
+      const payload = { q: query, type: slash === "news" ? "news" : "search" };
+      const json = await postJSON(`${origin}/api/search-web`, payload);
+      const md = formatSearchResults(json, slash === "news" ? "news" : "web");
+      return res.json({ content: md });
     }
 
-    // 3) Fallback: OpenAI answer (no browsing)
-    const reply = await callOpenAI(messages, role);
-    return res.status(200).json({ reply });
+    if (slash === "maps") {
+      const query = userText.replace(/^\/maps\s*/i, "").trim();
+      if (!query) {
+        return res.json({
+          content:
+            "Tell me what to find. Example:\n\n`/maps bbq caterers in Nashville`",
+        });
+      }
+      const json = await postJSON(`${origin}/api/maps-search`, { q: query });
+      const md = formatSearchResults(json, "Google Maps");
+      return res.json({ content: md });
+    }
+
+    // ---------------------------
+    // Normal AI reply (OpenAI)
+    // ---------------------------
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+    if (!OPENAI_API_KEY) {
+      return res.status(500).json({
+        error: "Missing OPENAI_API_KEY",
+        content:
+          "Server is missing `OPENAI_API_KEY`. Ask the admin to set it in Vercel.",
+      });
+    }
+
+    // Build the conversation for OpenAI
+    // Seed with a focused system prompt that knows about roles
+    const sys = [
+      systemPrompt || "",
+      "",
+      "You are CAPITALIZE's co-pilot. Keep answers concise, formatted in clean Markdown with headings and bullets when helpful.",
+      `Current console role: ${role}.`,
+      "If the user asks you to search, suggest `/search`, `/news`, or `/maps` commands (but only if they haven't used one already).",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        temperature: 0.4,
+        messages: [
+          { role: "system", content: sys },
+          ...messages.map((m) => ({
+            role: m.role === "assistant" ? "assistant" : m.role,
+            content: String(m.content || ""),
+          })),
+        ],
+      }),
+    });
+
+    if (!openaiRes.ok) {
+      const text = await openaiRes.text().catch(() => "");
+      throw new Error(`OpenAI error: ${openaiRes.status} ${openaiRes.statusText} — ${text}`);
+    }
+
+    const data = await openaiRes.json();
+    const content =
+      data?.choices?.[0]?.message?.content ||
+      "Got it — give me more details and I’ll draft the next step.";
+
+    return res.json({ content });
   } catch (err) {
-    console.error("chat error:", err);
-    return res.status(500).json({ error: "Chat failed" });
+    console.error("chat api error:", err);
+    return res.status(200).json({
+      content:
+        "_Couldn’t reach the server. Try again in a moment._\n\nIf this keeps happening, ping the team.",
+    });
   }
-}
-
-/* ---------- helpers ---------- */
-
-async function callInternal(url, body) {
-  const r = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body || {}),
-  });
-  if (!r.ok) throw new Error(`Internal fetch ${url} -> ${r.status}`);
-  return r.json();
-}
-
-function looksLikeWebQuestion(t) {
-  const s = t.toLowerCase();
-  // Simple triggers — tune freely
-  return (
-    /^what|^who|^where|^when|^why|^how/.test(s) ||
-    /latest|news|today|yesterday/.test(s) ||
-    /hours|menu|location|address|phone|review|ratings?/.test(s) ||
-    /nashville|denver|austin|seattle|chicago|nyc|los angeles|houston/.test(s) ||
-    /food truck|cater(er|ing)|restaurant|barbecue|bbq|grille|grill/.test(s)
-  );
-}
-
-function formatWeb(items = []) {
-  if (!items.length) return "No results found.";
-  // show up to 5 with titles, snippets, links
-  return (
-    "### Sources\n" +
-    items
-      .slice(0, 5)
-      .map(
-        (x, i) =>
-          `**${i + 1}. ${x.title || "Untitled"}**\n${x.snippet || ""}\n${x.link || ""}`
-      )
-      .join("\n\n")
-  );
-}
-
-function formatMaps(items = []) {
-  if (!items.length) return "No places found.";
-  return (
-    "### Places\n" +
-    items
-      .slice(0, 5)
-      .map(
-        (x, i) =>
-          `**${i + 1}. ${x.name}**\n${x.address || ""}\n⭐ ${x.rating ?? "?"} (${x.reviews ?? 0} reviews)\n${x.phone ? `☎ ${x.phone}\n` : ""}${x.maps_url ? `[View Map](${x.maps_url})` : ""}`
-      )
-      .join("\n\n")
-  );
-}
-
-async function callOpenAI(messages, role) {
-  const r = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: messages.map((m) => ({
-        role: m.role === "ai" ? "assistant" : m.role,
-        content: m.content,
-      })),
-      temperature: 0.3,
-    }),
-  });
-  if (!r.ok) throw new Error(`OpenAI ${r.status}`);
-  const data = await r.json();
-  return data.choices?.[0]?.message?.content || "No reply.";
 }
