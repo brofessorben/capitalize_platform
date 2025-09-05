@@ -1,116 +1,96 @@
 "use client";
+import { useState } from "react";
 
-import { useEffect, useRef, useState } from "react";
-import ChatBubble from "./ChatBubble";
-import LeadQuickCapture from "./LeadQuickCapture";
-
-const seeds = {
-  referrer:
-    "Yo! I’m your CAPITALIZE co-pilot. Drop vendor + host details (names, contacts, event info) and I’ll draft a tight intro.",
-  vendor:
-    "Vendor console: paste event facts (date, headcount, budget, location, notes) and I’ll draft a clean, sendable proposal.",
-  host:
-    "Tell me the plan (event, date, headcount, budget, location, vibe) and I’ll spin up a clear vendor request or proposal.",
-};
-
-async function callApi(messages, role) {
-  const res = await fetch("/api/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, role }),
-  });
-  if (!res.ok) throw new Error("bad status");
-  const data = await res.json();
-  return data.reply || "I’m ready — share details and I’ll draft the next step.";
-}
-
-export default function AIChatPage({ role = "referrer", header = "Referrer Console" }) {
-  const [messages, setMessages] = useState([
-    { role: "ai", content: seeds[role] || seeds.referrer },
-  ]);
-  const [busy, setBusy] = useState(false);
+export default function AIChatPage() {
+  const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
-  const taRef = useRef(null);
+  const [loading, setLoading] = useState(false);
 
-  // Auto-grow textarea (capped)
-  useEffect(() => {
-    const el = taRef.current;
-    if (!el) return;
-    el.style.height = "0px";
-    el.style.height = Math.min(el.scrollHeight, 220) + "px";
-  }, [input]);
-
-  function pushMsg(role, content) {
-    setMessages((m) => [...m, { role, content }]);
-  }
-
-  async function send() {
-    const text = input.trim();
-    if (!text || busy) return;
+  const sendMessage = async () => {
+    if (!input.trim()) return;
+    const newMsg = { role: "user", content: input.trim() };
+    setMessages((prev) => [...prev, newMsg]);
     setInput("");
-    pushMsg("user", text);
-    setBusy(true);
+    setLoading(true);
 
     try {
-      const reply = await callApi([...messages, { role: "user", content: text }], role);
-      pushMsg("ai", reply);
-    } catch {
-      pushMsg(
-        "ai",
-        "_Couldn’t reach the server. Paste your event details (event / date / headcount / budget / location / notes) and I’ll structure a clean message._"
-      );
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: [...messages, newMsg] }),
+      });
+
+      const data = await res.json();
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: data.reply },
+      ]);
+    } catch (err) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: "_Server ghosted us 👻. Try again in a sec._",
+        },
+      ]);
     } finally {
-      setBusy(false);
+      setLoading(false);
     }
-  }
+  };
 
   return (
-    <div className="mx-auto max-w-4xl p-4 md:p-6 rounded-2xl bg-gradient-to-b from-neutral-950 to-neutral-900 text-neutral-100 shadow-xl ring-1 ring-neutral-800">
-      <div className="text-[22px] font-semibold mb-3 tracking-tight">
-        {header}
-      </div>
+    <div className="min-h-screen bg-zinc-900 text-zinc-100 flex flex-col font-sans">
+      {/* Header */}
+      <header className="bg-zinc-800 p-4 shadow-md">
+        <h1 className="text-xl font-bold tracking-wide">
+          CAPITALIZE Referrer Console 🚀
+        </h1>
+        <p className="text-sm text-zinc-400">
+          Drop vendor + host details, or just ask away.
+        </p>
+      </header>
 
-      <div className="space-y-3 mb-4 max-h-[60vh] overflow-y-auto pr-1">
+      {/* Chat window */}
+      <main className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map((m, i) => (
-          <ChatBubble key={i} role={m.role === "user" ? "user" : "ai"} content={m.content} />
+          <div
+            key={i}
+            className={`max-w-[80%] rounded-2xl px-4 py-2 whitespace-pre-line leading-relaxed ${
+              m.role === "user"
+                ? "bg-green-600 text-white ml-auto"
+                : "bg-zinc-700 text-zinc-100"
+            }`}
+          >
+            {m.content}
+          </div>
         ))}
-        {busy && <ChatBubble role="ai" content="_Typing…_" />}
-      </div>
+        {loading && (
+          <div className="bg-zinc-700 text-zinc-300 rounded-2xl px-4 py-2 w-fit animate-pulse">
+            Thinking…
+          </div>
+        )}
+      </main>
 
-      <div className="flex items-end gap-2">
-        <textarea
-          ref={taRef}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-              e.preventDefault();
-              send();
-            }
-          }}
-          placeholder="Type to brief the co-pilot…  (/search, /news, /maps supported) — Cmd/Ctrl+Enter to send"
-          className="flex-1 min-h-[44px] max-h-[220px] resize-none rounded-xl bg-neutral-900 text-neutral-100 placeholder-neutral-500 border border-neutral-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
-        />
-        <button
-          onClick={send}
-          disabled={busy}
-          className="px-4 py-2 rounded-xl bg-emerald-600 text-white disabled:opacity-60 hover:bg-emerald-500 transition"
-          aria-label="Send"
-        >
-          {busy ? "…" : "Send"}
-        </button>
-      </div>
-
-      {role === "referrer" && (
-        <div className="mt-5">
-          <LeadQuickCapture
-            onDraft={(lines) => {
-              pushMsg("user", "(Draft intro)");
-              pushMsg("ai", lines.join("\n"));
-            }}
+      {/* Input */}
+      <footer className="p-4 bg-zinc-800 border-t border-zinc-700">
+        <div className="flex items-center space-x-2">
+          <input
+            type="text"
+            className="flex-1 bg-zinc-900 text-zinc-100 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500 placeholder-zinc-500"
+            placeholder="Type your message…"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && sendMessage()}
           />
+          <button
+            onClick={sendMessage}
+            disabled={loading}
+            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-semibold transition disabled:opacity-50"
+          >
+            Send
+          </button>
         </div>
-      )}
+      </footer>
     </div>
   );
 }
