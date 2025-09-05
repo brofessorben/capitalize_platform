@@ -1,5 +1,5 @@
 import React from "react";
-import AIChatPage from "../../AIChatPage";
+import AIChatPage from '../../components/AIChatPage';
 
 export default function ReferrerDash() {
   return (
