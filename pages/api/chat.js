@@ -1,6 +1,6 @@
 // pages/api/chat.js
 import OpenAI from "openai";
-import { systemPrompt } from "../../lib/systemPrompt"; // named export
+import { systemPrompt } from "@/lib/systemPrompt"; // named export
 
 export const config = {
   api: { bodyParser: true },
@@ -10,12 +10,18 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-/* ----------------------------- helpers: search ----------------------------- */
+// ---------- helpers ---------------------------------------------------------
+
+function stripPolite(text) {
+  // trims leading “please/hey/can you” type fluff so queries are cleaner
+  return String(text || "")
+    .replace(/^\s*(hey|hi|hello|please|can you|could you|would you)\b[:,\s]*/i, "")
+    .trim();
+}
 
 async function doWebSearch(query) {
   const key = process.env.SERPAPI_KEY;
   if (!key) throw new Error("SERPAPI_KEY missing");
-
   const url = new URL("https://serpapi.com/search.json");
   url.searchParams.set("engine", "google");
   url.searchParams.set("q", query);
@@ -23,7 +29,7 @@ async function doWebSearch(query) {
   url.searchParams.set("hl", "en");
   url.searchParams.set("api_key", key);
 
-  const r = await fetch(url);
+  const r = await fetch(url, { next: { revalidate: 60 } });
   if (!r.ok) throw new Error("serpapi web request failed");
   const j = await r.json();
 
@@ -39,8 +45,7 @@ async function doWebSearch(query) {
     `**Web results for:** ${query}`,
     "",
     ...results.map(
-      (r, i) =>
-        `${i + 1}. [${r.title}](${r.link})  \n   ${r.snippet ? r.snippet : ""}`
+      (r, i) => `${i + 1}. [${r.title}](${r.link})  \n   ${r.snippet ?? ""}`
     ),
   ].join("\n");
 }
@@ -48,7 +53,6 @@ async function doWebSearch(query) {
 async function doNewsSearch(query) {
   const key = process.env.SERPAPI_KEY;
   if (!key) throw new Error("SERPAPI_KEY missing");
-
   const url = new URL("https://serpapi.com/search.json");
   url.searchParams.set("engine", "google_news");
   url.searchParams.set("q", query);
@@ -57,7 +61,7 @@ async function doNewsSearch(query) {
   url.searchParams.set("num", "5");
   url.searchParams.set("api_key", key);
 
-  const r = await fetch(url);
+  const r = await fetch(url, { next: { revalidate: 60 } });
   if (!r.ok) throw new Error("serpapi news request failed");
   const j = await r.json();
 
@@ -78,7 +82,7 @@ async function doNewsSearch(query) {
       (r, i) =>
         `${i + 1}. [${r.title}](${r.link}) — ${r.source}${
           r.date ? ` (${r.date})` : ""
-        }  \n   ${r.snippet ? r.snippet : ""}`
+        }  \n   ${r.snippet ?? ""}`
     ),
   ].join("\n");
 }
@@ -93,7 +97,7 @@ async function doMapsSearch(query) {
   url.searchParams.set("query", query);
   url.searchParams.set("key", key);
 
-  const r = await fetch(url);
+  const r = await fetch(url, { next: { revalidate: 300 } });
   if (!r.ok) throw new Error("google places request failed");
   const j = await r.json();
 
@@ -105,91 +109,49 @@ async function doMapsSearch(query) {
     place_id: p.place_id,
   }));
 
-  if (!results.length) return "_No places found._";
+  // Fallback to web if Places has nothing
+  if (!results.length) {
+    return await doWebSearch(query);
+  }
 
   const lines = results.map((p, i) => {
     const mapLink = `https://www.google.com/maps/place/?q=place_id:${p.place_id}`;
     const rating =
-      p.rating && p.total_ratings
-        ? ` — ${p.rating}★ (${p.total_ratings})`
-        : "";
+      p.rating && p.total_ratings ? ` — ${p.rating}★ (${p.total_ratings})` : "";
     return `${i + 1}. **${p.name}**${rating}  \n   ${p.address}  \n   ${mapLink}`;
   });
 
   return ["**Google Maps results for:** " + query, "", ...lines].join("\n");
 }
 
-/* ------------------------- helpers: intent detection ----------------------- */
-
-function cleanText(text = "") {
-  return String(text)
-    .replace(/^`+|`+$/g, "") // strip backticks if pasted
-    .replace(/^"+|"+$/g, "") // strip quotes if pasted
-    .trim();
-}
-
-function stripPolitePreamble(s) {
-  // remove leading “can you”, “please”, etc.
-  return s
-    .replace(
-      /^(can you|could you|please|pls|hey|yo|hi|okay|ok|would you|i need|find me|look up)\b[\s,:-]*/i,
-      ""
-    )
-    .trim();
-}
-
-function detectIntent(raw) {
-  const text = cleanText(raw);
+// Simple intent detector for natural language (non-slash) prompts
+function detectIntent(text) {
   const lower = text.toLowerCase();
 
-  // explicit slash commands always win
-  const slash = lower.match(/^\/(search|news|maps)\s+(.+)/i);
-  if (slash) {
-    return { type: slash[1], query: cleanText(slash[2]) };
-  }
-
-  // very lightweight heuristics
-
-  // NEWS: mentions of news-y words or public figures + “today/this week/latest”
+  // Strong signals for web search
   if (
-    /(news|headline|breaking|tweet|twitter|x\.com|latest|today|this week)/i.test(
+    /(^|\b)(menu|review|reviews|hours|website|url|contact|price|pricing|quote|news|article|press|tweet|twitter|instagram|facebook)\b/.test(
       lower
     )
   ) {
-    return { type: "news", query: stripPolitePreamble(text) };
+    return { type: "search", query: stripPolite(text) };
   }
 
-  // MAPS: “near me”, “in <city>”, or venue-type words
-  if (
-    /(near me|address|directions|map|maps|in [a-z\s]+|nearby)/i.test(lower) ||
-    /(restaurant|cater|caterer|bar|venue|hotel|food truck|truck|bbq|grille|grill|coffee|bakery|pizza|tacos)/i.test(
-      lower
-    )
-  ) {
-    return { type: "maps", query: stripPolitePreamble(text) };
+  // If it names a place/business or “find … in <city>” → try maps
+  if (/\b(find|near|in|at)\b.*\b(restaurant|truck|vendor|bar|cafe|cater|venue|hotel|grille|grill|bbq|food)\b/.test(lower)) {
+    return { type: "maps", query: stripPolite(text) };
   }
 
-  // WEB: “menu, hours, phone, reviews, price, what is, who is, website”
-  if (
-    /(menu|hours|reviews|rating|website|phone|email|price|what is|who is|how to|official site)/i.test(
-      lower
-    )
-  ) {
-    return { type: "search", query: stripPolitePreamble(text) };
+  // Generic “what’s happening today / latest / broke / announced” → news
+  if (/\b(today|latest|headline|breaking|announced|tweet(?:ed)?|post(?:ed)?)\b/.test(lower)) {
+    return { type: "news", query: stripPolite(text) };
   }
 
-  // If message starts with “find / search / look up”
-  if (/^(find|search|look up|google)\b/i.test(lower)) {
-    return {
-      type: "search",
-      query: lower.replace(/^(find|search|look up|google)\b/i, "").trim(),
-    };
-  }
-
+  // Default: no special intent, let OpenAI handle it
   return { type: "chat" };
 }
 
-/* --------------------------------- handler -------------------------------- */
+// ---------- main handler ----------------------------------------------------
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -201,28 +163,36 @@ export default async function handler(req, res) {
     const last = messages[messages.length - 1];
     const userText = (last && last.content) || "";
 
-    // decide what to do
-    const intent = detectIntent(userText);
-
-    if (intent.type === "search") {
-      const md = await doWebSearch(intent.query);
+    // explicit slash commands
+    const slash = userText.trim().match(/^\/(search|news|maps)\s+(.+)/i);
+    if (slash) {
+      const [, cmd, queryRaw] = slash;
+      const query = stripPolite(queryRaw);
+      let md;
+      if (cmd === "search") md = await doWebSearch(query);
+      else if (cmd === "news") md = await doNewsSearch(query);
+      else md = await doMapsSearch(query);
       return res.status(200).json({ reply: md });
+    }
+
+    // natural language intent → route before model
+    const intent = detectIntent(userText);
+    if (intent.type === "search") {
+      return res.status(200).json({ reply: await doWebSearch(intent.query) });
     }
     if (intent.type === "news") {
-      const md = await doNewsSearch(intent.query);
-      return res.status(200).json({ reply: md });
+      return res.status(200).json({ reply: await doNewsSearch(intent.query) });
     }
     if (intent.type === "maps") {
-      const md = await doMapsSearch(intent.query);
-      return res.status(200).json({ reply: md });
+      return res.status(200).json({ reply: await doMapsSearch(intent.query) });
     }
 
-    // Normal chat → OpenAI
+    // standard chat with OpenAI
     const sys = [
       systemPrompt,
       "",
       `User role: ${role}`,
-      "Keep responses crisp, structured (use headings & bullets when useful), and action-forward.",
+      "Use clean formatting (headings, bullets). If the user asks for live info, suggest `/search`, `/news`, or `/maps` unless you already routed it.",
     ].join("\n");
 
     const chat = await openai.chat.completions.create({
@@ -231,8 +201,7 @@ export default async function handler(req, res) {
       messages: [
         { role: "system", content: sys },
         ...messages.map((m) => ({
-          role:
-            m.role === "assistant" || m.role === "ai" ? "assistant" : m.role,
+          role: m.role === "assistant" || m.role === "ai" ? "assistant" : m.role,
           content: String(m.content ?? ""),
         })),
       ],
@@ -241,13 +210,13 @@ export default async function handler(req, res) {
     const reply =
       chat.choices?.[0]?.message?.content?.trim() ||
       "I’m here—share details and I’ll draft the next message.";
-
     return res.status(200).json({ reply });
   } catch (err) {
     console.error("api/chat error:", err);
+    // Return a normal 200 with a friendly inline message so the UI stays calm
     return res.status(200).json({
       reply:
         "_Couldn’t reach the server. Try again in a moment. If this keeps happening, ping the team._",
     });
   }
-}
+      }
