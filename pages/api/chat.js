@@ -1,6 +1,6 @@
 // pages/api/chat.js
 import OpenAI from "openai";
-import { systemPrompt } from "../../lib/systemPrompt";
+import { systemPrompt } from "../../lib/systemPrompt"; // named export
 
 export const config = {
   api: { bodyParser: true },
@@ -10,7 +10,7 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// ---------- helpers ---------------------------------------------------------
+/* ----------------------------- helpers: search ----------------------------- */
 
 async function doWebSearch(query) {
   const key = process.env.SERPAPI_KEY;
@@ -23,17 +23,14 @@ async function doWebSearch(query) {
   url.searchParams.set("hl", "en");
   url.searchParams.set("api_key", key);
 
-  const r = await fetch(url, { next: { revalidate: 60 } });
-  if (!r.ok) {
-    const txt = await r.text().catch(() => "");
-    throw new Error(`serpapi web failed: ${r.status} ${txt}`);
-  }
+  const r = await fetch(url);
+  if (!r.ok) throw new Error("serpapi web request failed");
   const j = await r.json();
 
-  const results = (j.organic_results || []).slice(0, 5).map((it) => ({
-    title: it.title,
-    link: it.link,
-    snippet: it.snippet,
+  const results = (j.organic_results || []).slice(0, 5).map((r) => ({
+    title: r.title,
+    link: r.link,
+    snippet: r.snippet,
   }));
 
   if (!results.length) return "_No web results found._";
@@ -60,19 +57,16 @@ async function doNewsSearch(query) {
   url.searchParams.set("num", "5");
   url.searchParams.set("api_key", key);
 
-  const r = await fetch(url, { next: { revalidate: 60 } });
-  if (!r.ok) {
-    const txt = await r.text().catch(() => "");
-    throw new Error(`serpapi news failed: ${r.status} ${txt}`);
-  }
+  const r = await fetch(url);
+  if (!r.ok) throw new Error("serpapi news request failed");
   const j = await r.json();
 
-  const results = (j.news_results || []).slice(0, 5).map((it) => ({
-    title: it.title,
-    link: it.link,
-    source: it.source,
-    date: it.date,
-    snippet: it.snippet,
+  const results = (j.news_results || []).slice(0, 5).map((r) => ({
+    title: r.title,
+    link: r.link,
+    source: r.source,
+    date: r.date,
+    snippet: r.snippet,
   }));
 
   if (!results.length) return "_No recent articles found._";
@@ -99,14 +93,11 @@ async function doMapsSearch(query) {
   url.searchParams.set("query", query);
   url.searchParams.set("key", key);
 
-  const r = await fetch(url, { next: { revalidate: 300 } });
-  if (!r.ok) {
-    const txt = await r.text().catch(() => "");
-    throw new Error(`google places failed: ${r.status} ${txt}`);
-  }
+  const r = await fetch(url);
+  if (!r.ok) throw new Error("google places request failed");
   const j = await r.json();
 
-  const results = (j.results || []).slice(0, 12).map((p) => ({
+  const results = (j.results || []).slice(0, 8).map((p) => ({
     name: p.name,
     address: p.formatted_address,
     rating: p.rating,
@@ -128,7 +119,77 @@ async function doMapsSearch(query) {
   return ["**Google Maps results for:** " + query, "", ...lines].join("\n");
 }
 
-// ---------- handler ---------------------------------------------------------
+/* ------------------------- helpers: intent detection ----------------------- */
+
+function cleanText(text = "") {
+  return String(text)
+    .replace(/^`+|`+$/g, "") // strip backticks if pasted
+    .replace(/^"+|"+$/g, "") // strip quotes if pasted
+    .trim();
+}
+
+function stripPolitePreamble(s) {
+  // remove leading “can you”, “please”, etc.
+  return s
+    .replace(
+      /^(can you|could you|please|pls|hey|yo|hi|okay|ok|would you|i need|find me|look up)\b[\s,:-]*/i,
+      ""
+    )
+    .trim();
+}
+
+function detectIntent(raw) {
+  const text = cleanText(raw);
+  const lower = text.toLowerCase();
+
+  // explicit slash commands always win
+  const slash = lower.match(/^\/(search|news|maps)\s+(.+)/i);
+  if (slash) {
+    return { type: slash[1], query: cleanText(slash[2]) };
+  }
+
+  // very lightweight heuristics
+
+  // NEWS: mentions of news-y words or public figures + “today/this week/latest”
+  if (
+    /(news|headline|breaking|tweet|twitter|x\.com|latest|today|this week)/i.test(
+      lower
+    )
+  ) {
+    return { type: "news", query: stripPolitePreamble(text) };
+  }
+
+  // MAPS: “near me”, “in <city>”, or venue-type words
+  if (
+    /(near me|address|directions|map|maps|in [a-z\s]+|nearby)/i.test(lower) ||
+    /(restaurant|cater|caterer|bar|venue|hotel|food truck|truck|bbq|grille|grill|coffee|bakery|pizza|tacos)/i.test(
+      lower
+    )
+  ) {
+    return { type: "maps", query: stripPolitePreamble(text) };
+  }
+
+  // WEB: “menu, hours, phone, reviews, price, what is, who is, website”
+  if (
+    /(menu|hours|reviews|rating|website|phone|email|price|what is|who is|how to|official site)/i.test(
+      lower
+    )
+  ) {
+    return { type: "search", query: stripPolitePreamble(text) };
+  }
+
+  // If message starts with “find / search / look up”
+  if (/^(find|search|look up|google)\b/i.test(lower)) {
+    return {
+      type: "search",
+      query: lower.replace(/^(find|search|look up|google)\b/i, "").trim(),
+    };
+  }
+
+  return { type: "chat" };
+}
+
+/* --------------------------------- handler -------------------------------- */
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -140,66 +201,28 @@ export default async function handler(req, res) {
     const last = messages[messages.length - 1];
     const userText = (last && last.content) || "";
 
-    // Slash commands (return early)
-    const slash = userText.trim().match(/^\/(search|news|maps)\s+(.+)/i);
-    if (slash) {
-      const [, cmd, query] = slash;
-      try {
-        if (cmd === "search") {
-          const md = await doWebSearch(query);
-          return res.status(200).json({ reply: md });
-        }
-        if (cmd === "news") {
-          const md = await doNewsSearch(query);
-          return res.status(200).json({ reply: md });
-        }
-        // maps
-        const md = await doMapsSearch(query);
-        return res.status(200).json({ reply: md });
-      } catch (e) {
-        console.error("slash-command error:", e);
-        return res
-          .status(200)
-          .json({ reply: "_Search failed. Try again in a minute._" });
-      }
+    // decide what to do
+    const intent = detectIntent(userText);
+
+    if (intent.type === "search") {
+      const md = await doWebSearch(intent.query);
+      return res.status(200).json({ reply: md });
+    }
+    if (intent.type === "news") {
+      const md = await doNewsSearch(intent.query);
+      return res.status(200).json({ reply: md });
+    }
+    if (intent.type === "maps") {
+      const md = await doMapsSearch(intent.query);
+      return res.status(200).json({ reply: md });
     }
 
-    // Heuristic: if user explicitly asks for current info, push them to slash search
-    if (/\b(today|latest|current|menu|hours|address|reviews?)\b/i.test(userText)) {
-      // Nudge but still answer with OpenAI if they ignore it
-      const tip =
-        "_Tip: for live results use `/search your query`, `/news your topic`, or `/maps your place`._\n\n";
-      const sys = [
-        systemPrompt,
-        "",
-        `User role: ${role}`,
-        "Use clean headings & bullets. Be action-forward.",
-      ].join("\n");
-
-      const chat = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        temperature: 0.3,
-        messages: [
-          { role: "system", content: sys },
-          ...messages.map((m) => ({
-            role: m.role === "assistant" || m.role === "ai" ? "assistant" : m.role,
-            content: String(m.content ?? ""),
-          })),
-        ],
-      });
-
-      const reply =
-        chat.choices?.[0]?.message?.content?.trim() ||
-        "I’m here—share details and I’ll draft the next message.";
-      return res.status(200).json({ reply: tip + reply });
-    }
-
-    // Normal chat flow
+    // Normal chat → OpenAI
     const sys = [
       systemPrompt,
       "",
       `User role: ${role}`,
-      "Keep responses crisp, structured (use headings & bullets), and action-forward.",
+      "Keep responses crisp, structured (use headings & bullets when useful), and action-forward.",
     ].join("\n");
 
     const chat = await openai.chat.completions.create({
@@ -208,7 +231,8 @@ export default async function handler(req, res) {
       messages: [
         { role: "system", content: sys },
         ...messages.map((m) => ({
-          role: m.role === "assistant" || m.role === "ai" ? "assistant" : m.role,
+          role:
+            m.role === "assistant" || m.role === "ai" ? "assistant" : m.role,
           content: String(m.content ?? ""),
         })),
       ],
@@ -223,7 +247,7 @@ export default async function handler(req, res) {
     console.error("api/chat error:", err);
     return res.status(200).json({
       reply:
-        "_Couldn’t reach the server. Try again in a moment. If this keeps happening, check Logs in Vercel._",
+        "_Couldn’t reach the server. Try again in a moment. If this keeps happening, ping the team._",
     });
   }
 }
