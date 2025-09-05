@@ -1,5 +1,13 @@
-import AIChatPage from "@/app/components/aichatpage";
+"use client";
 
-export default function ReferrerPage() {
+import dynamic from "next/dynamic";
+
+// RELATIVE import (no alias)
+const AIChatPage = dynamic(
+  () => import("../../components/aichatpage"),
+  { ssr: false }
+);
+
+export default function ReferrerDash() {
   return <AIChatPage role="referrer" header="Referrer Console" />;
 }
