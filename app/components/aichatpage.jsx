@@ -3,20 +3,19 @@
 import React, { useEffect, useRef, useState } from "react";
 import ChatBubble from "./ChatBubble";
 import LeadQuickCapture from "./LeadQuickCapture"; // keep if you have it
-// If you don't have this component, remove the block that renders it below.
 
-type Role = "referrer" | "vendor" | "host";
-
-const seeds: Record<Role, string> = {
+// Role presets (quick, helpful, a little cheeky)
+const seeds = {
   referrer:
-    "Yo! I’m your CAPITALIZE co-pilot. Tell me who you’re connecting (vendor + host) and any context (event, date, headcount, budget). I’ll draft the intro and keep momentum.",
+    "Yo! I’m your CAPITALIZE co-pilot. Drop in vendor + host details (names, contacts, event info) and I’ll draft the intro for you. Ask me anything.",
   vendor:
-    "Welcome to your vendor console. Paste the lead details (event, date, headcount, budget, location, notes) and I’ll draft a tight reply/proposal you can send.",
+    "Welcome to your vendor console. Paste the lead (event, date, headcount, budget, location, notes). I’ll turn it into a clean reply/proposal.",
   host:
-    "Welcome! Tell me what you’re planning (event, date, headcount, budget, location, vibe). I’ll generate a clean vendor request or proposal.",
+    "Welcome! Tell me what you’re planning (event, date, headcount, budget, location, vibe). I’ll draft outreach to vendors—fast.",
 };
 
-async function callChatAPI(messages: Array<{ role: string; content: string }>, role: Role) {
+// Call your API route (supports slash commands handled on the server)
+async function callChatAPI(messages, role) {
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -24,67 +23,58 @@ async function callChatAPI(messages: Array<{ role: string; content: string }>, r
   });
   if (!res.ok) throw new Error("bad status");
   const data = await res.json();
-  // API returns { reply: string }
-  return String(data.reply ?? "");
+  // Server responds as { reply: string }
+  return data.reply || "I’m here—drop details and I’ll draft the next move.";
 }
 
 export default function AIChatPage({
   role = "referrer",
   header = "Referrer Console",
-}: {
-  role?: Role;
-  header?: string;
 }) {
-  const [messages, setMessages] = useState<Array<{ role: "user" | "ai"; content: string }>>([
+  const [messages, setMessages] = useState([
     { role: "ai", content: seeds[role] || seeds.referrer },
   ]);
-  const [busy, setBusy] = useState(false);
   const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const taRef = useRef(null);
+  const listRef = useRef(null);
 
-  // Auto-grow textarea up to 240px
+  // Autosize textarea
   useEffect(() => {
     const el = taRef.current;
     if (!el) return;
     el.style.height = "0px";
-    el.style.height = Math.min(el.scrollHeight, 240) + "px";
+    el.style.height = Math.min(el.scrollHeight, 220) + "px";
   }, [input]);
 
-  const pushMsg = (r: "user" | "ai", c: string) =>
-    setMessages((m) => [...m, { role: r, content: c }]);
+  // Scroll to bottom on new message
+  useEffect(() => {
+    const box = listRef.current;
+    if (box) box.scrollTop = box.scrollHeight;
+  }, [messages, busy]);
+
+  function push(role, content) {
+    setMessages((m) => [...m, { role, content }]);
+  }
 
   async function send() {
     const text = input.trim();
     if (!text || busy) return;
     setInput("");
-    pushMsg("user", text);
+    push("user", text);
     setBusy(true);
 
     try {
-      // Chat with OpenAI (API also handles /search, /news, /maps)
       const reply = await callChatAPI(
         [...messages, { role: "user", content: text }],
         role
       );
-      pushMsg("ai", reply);
-
-      // Try to sniff out structured “lead” info from the assistant reply to auto-fill the bottom form.
-      // We look for simple lines like "Event:", "Date:", etc. If found, emit a custom event.
-      const auto = extractLeadDraft(reply);
-      if (auto && Object.keys(auto).length) {
-        // Let any form below listen for this
-        window.dispatchEvent(new CustomEvent("ai:draft", { detail: auto }));
-      }
-    } catch {
-      pushMsg(
+      push("ai", reply);
+    } catch (e) {
+      push(
         "ai",
-        [
-          "### I’m here",
-          "",
-          "I couldn’t reach the server just now.",
-          "Paste your details (event / date / headcount / budget / location / notes) and I’ll structure a clean message.",
-        ].join("\n")
+        "_Couldn’t reach the server. One sec—try again in a moment. If this keeps happening, ping the team._"
       );
     } finally {
       setBusy(false);
@@ -93,97 +83,72 @@ export default function AIChatPage({
 
   return (
     <div className="mx-auto max-w-4xl p-4 md:p-6">
-      <div className="text-xl font-semibold mb-4 text-white">{header}</div>
+      {/* Card container */}
+      <div className="rounded-2xl bg-neutral-900/80 ring-1 ring-neutral-800 shadow-[0_6px_30px_rgba(0,0,0,0.35)]">
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-neutral-800 flex items-center justify-between">
+          <h1 className="text-lg md:text-xl font-semibold text-white">{header}</h1>
+          <span className="text-xs text-neutral-400 hidden md:block">
+            Pro tip: <code className="bg-neutral-800 px-1 rounded">/search</code>,{" "}
+            <code className="bg-neutral-800 px-1 rounded">/news</code>,{" "}
+            <code className="bg-neutral-800 px-1 rounded">/maps</code> are supported.
+          </span>
+        </div>
 
-      {/* Chat stream */}
-      <div className="space-y-3 mb-4">
-        {messages.map((m, i) => (
-          <ChatBubble
-            key={i}
-            role={m.role}
-            content={String(m.content ?? "")}
-          />
-        ))}
-        {busy && <ChatBubble role="ai" content="_Typing…_" />}
-      </div>
-
-      {/* Composer */}
-      <div className="flex items-end gap-2">
-        <textarea
-          ref={taRef}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            // Enter = newline; Cmd/Ctrl+Enter = send
-            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-              e.preventDefault();
-              send();
-            }
-          }}
-          placeholder="Type your message…  (/search bbq Nashville · /news AI events · /maps bars downtown)"
-          className="flex-1 min-h-[44px] max-h-[240px] resize-none rounded-xl bg-neutral-900 text-white placeholder-neutral-400 border border-neutral-800 px-3 py-2"
-        />
-        <button
-          onClick={send}
-          disabled={busy}
-          className="px-4 py-2 rounded-xl bg-emerald-600 text-white disabled:opacity-60"
-          aria-label="Send"
+        {/* Messages */}
+        <div
+          ref={listRef}
+          className="px-4 md:px-5 py-4 space-y-3 max-h-[60vh] overflow-y-auto scroll-smooth"
         >
-          {busy ? "…" : "Send"}
-        </button>
+          {messages.map((m, i) => (
+            <ChatBubble
+              key={i}
+              role={m.role === "user" ? "user" : "ai"}
+              content={m.content}
+              // ChatBubble should already style; we keep spacing tight
+            />
+          ))}
+          {busy && <ChatBubble role="ai" content="_Typing…_" />}
+        </div>
+
+        {/* Composer */}
+        <div className="px-4 md:px-5 py-4 border-t border-neutral-800 flex items-end gap-2">
+          <textarea
+            ref={taRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                e.preventDefault();
+                send();
+              }
+            }}
+            placeholder="Type it. I’ll make it shine. (Cmd/Ctrl+Enter to send)"
+            className="flex-1 min-h-[44px] max-h-[220px] resize-none rounded-xl bg-neutral-800 text-white placeholder-neutral-400 border border-neutral-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 px-3 py-2"
+          />
+          <button
+            onClick={send}
+            disabled={busy}
+            className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-medium hover:bg-emerald-500 disabled:opacity-60 transition"
+            aria-label="Send"
+          >
+            {busy ? "…" : "Send"}
+          </button>
+        </div>
       </div>
 
-      {/* Optional: lead quick capture block */}
+      {/* Lead form under chat (only for referrers) */}
       {role === "referrer" && typeof LeadQuickCapture !== "undefined" && (
-        <div className="mt-4">
+        <div className="mt-6">
           <LeadQuickCapture
-            onDraft={(lines: string[]) => {
-              // show the draft in the chat
-              pushMsg("user", "(Draft intro)");
-              pushMsg("ai", lines.join("\n"));
-              // also broadcast it for any form listener
-              window.dispatchEvent(
-                new CustomEvent("ai:draft", {
-                  detail: coerceDraftLines(lines),
-                })
-              );
+            onDraft={(lines) => {
+              // quick helper for demos: drop a polished draft
+              push("user", "(Draft intro)");
+              push("ai", lines.join("\n"));
             }}
           />
         </div>
       )}
     </div>
   );
-}
-
-/** Try to pull simple fields from the assistant reply and emit as a draft object. */
-function extractLeadDraft(text: string) {
-  const out: Record<string, string> = {};
-  const map: Record<string, RegExp> = {
-    event: /^event\s*:\s*(.+)$/im,
-    date: /^date\s*:\s*(.+)$/im,
-    headcount: /^headcount\s*:\s*(.+)$/im,
-    budget: /^budget\s*:\s*(.+)$/im,
-    location: /^location\s*:\s*(.+)$/im,
-    notes: /^notes?\s*:\s*(.+)$/im,
-    hostName: /^host\s*name\s*:\s*(.+)$/im,
-    hostEmail: /^host\s*email\s*:\s*(.+)$/im,
-    hostPhone: /^host\s*phone\s*:\s*(.+)$/im,
-    vendorName: /^vendor\s*name\s*:\s*(.+)$/im,
-    vendorEmail: /^vendor\s*email\s*:\s*(.+)$/im,
-  };
-  for (const [key, rx] of Object.entries(map)) {
-    const m = text.match(rx);
-    if (m && m[1]) out[key] = m[1].trim();
-  }
-  return out;
-}
-
-/** If LeadQuickCapture hands us lines of "Field: value", turn into a draft object. */
-function coerceDraftLines(lines: string[]) {
-  const out: Record<string, string> = {};
-  for (const raw of lines) {
-    const m = raw.match(/^\s*([^:]+):\s*(.+)\s*$/);
-    if (m) out[m[1].trim()] = m[2].trim();
-  }
-  return out;
 }
