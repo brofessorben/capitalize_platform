@@ -1,6 +1,6 @@
 // pages/api/chat.js
 import OpenAI from "openai";
-import { systemPrompt } from "@/lib/systemPrompt"; // <-- named export
+import { systemPrompt } from "../../lib/systemPrompt"; // simple relative import
 
 export const config = {
   api: { bodyParser: true },
@@ -107,7 +107,6 @@ async function doMapsSearch(query) {
 
   if (!results.length) return "_No places found._";
 
-  // Links to the Google Maps place by place_id
   const lines = results.map((p, i) => {
     const mapLink = `https://www.google.com/maps/place/?q=place_id:${p.place_id}`;
     const rating =
@@ -155,7 +154,7 @@ export default async function handler(req, res) {
     ].join("\n");
 
     const chat = await openai.chat.completions.create({
-      model: "gpt-4o-mini", // fast + cheap; swap if you prefer
+      model: "gpt-4o-mini",
       temperature: 0.3,
       messages: [
         { role: "system", content: sys },
@@ -173,11 +172,9 @@ export default async function handler(req, res) {
     return res.status(200).json({ reply });
   } catch (err) {
     console.error("api/chat error:", err);
-    return res
-      .status(200)
-      .json({
-        reply:
-          "_Couldn’t reach the server. Try again in a moment. If this keeps happening, ping the team._",
-      });
+    return res.status(200).json({
+      reply:
+        "_Couldn’t reach the server. Try again in a moment. If this keeps happening, ping the team._",
+    });
   }
-      }
+}
