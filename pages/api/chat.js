@@ -1,6 +1,6 @@
 // pages/api/chat.js
 import OpenAI from "openai";
-import { systemPrompt } from "@/lib/systemPrompt";
+import { systemPrompt } from "../../lib/systemPrompt";
 
 export const config = {
   api: { bodyParser: true },
