@@ -1,172 +1,183 @@
 // pages/api/chat.js
-/* eslint-disable no-console */
+import OpenAI from "openai";
+import { systemPrompt } from "@/lib/systemPrompt"; // <-- named export
 
-import systemPrompt from "../../lib/systemPrompt";
+export const config = {
+  api: { bodyParser: true },
+};
 
-// Build a reliable absolute origin on Vercel (works locally, too)
-function getOrigin(req) {
-  // Prefer Vercel's injected URL (e.g. my-app.vercel.app)
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  // Fallback to the host header (local dev)
-  const host = req?.headers?.host || "localhost:3000";
-  const proto = (req?.headers?.["x-forwarded-proto"] || "").includes("https")
-    ? "https"
-    : "http";
-  return `${proto}://${host}`;
-}
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
-// POST helper with sane defaults
-async function postJSON(url, payload) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 20000); // 20s safety timeout
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload || {}),
-      signal: ctrl.signal,
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`HTTP ${res.status} ${res.statusText} — ${text}`);
-    }
-    return await res.json();
-  } finally {
-    clearTimeout(t);
-  }
-}
+// ---- helpers ---------------------------------------------------------------
 
-function formatSearchResults(json, sourceLabel = "web") {
-  const items = Array.isArray(json?.results) ? json.results : [];
-  if (!items.length) {
-    return "_No results found. Try a more specific query._";
-  }
-  // Markdown list with title → link + snippet
-  const lines = items.slice(0, 8).map((r, i) => {
-    const title = r.title || r.name || r.url || "Result";
-    const url = r.url || r.link || r.website || "";
-    const snippet = r.snippet || r.description || r.formatted_address || r.vicinity || "";
-    return `**${i + 1}. [${title}](${url})**\n${snippet ? `${snippet}\n` : ""}`;
-  });
+async function doWebSearch(query) {
+  const key = process.env.SERPAPI_KEY;
+  if (!key) throw new Error("SERPAPI_KEY missing");
+
+  const url = new URL("https://serpapi.com/search.json");
+  url.searchParams.set("engine", "google");
+  url.searchParams.set("q", query);
+  url.searchParams.set("num", "5");
+  url.searchParams.set("hl", "en");
+  url.searchParams.set("api_key", key);
+
+  const r = await fetch(url, { next: { revalidate: 60 } });
+  if (!r.ok) throw new Error("serpapi web request failed");
+  const j = await r.json();
+
+  const results = (j.organic_results || []).slice(0, 5).map((r) => ({
+    title: r.title,
+    link: r.link,
+    snippet: r.snippet,
+  }));
+
+  if (!results.length) return "_No web results found._";
+
   return [
-    `### Top ${sourceLabel} results`,
+    `**Web results for:** ${query}`,
     "",
-    ...lines,
-    "",
-    "_Tip: ask me to summarize or compare any of these._",
+    ...results.map(
+      (r, i) =>
+        `${i + 1}. [${r.title}](${r.link})  \n   ${r.snippet ? r.snippet : ""}`
+    ),
   ].join("\n");
 }
 
+async function doNewsSearch(query) {
+  const key = process.env.SERPAPI_KEY;
+  if (!key) throw new Error("SERPAPI_KEY missing");
+
+  const url = new URL("https://serpapi.com/search.json");
+  url.searchParams.set("engine", "google_news");
+  url.searchParams.set("q", query);
+  url.searchParams.set("hl", "en");
+  url.searchParams.set("gl", "us");
+  url.searchParams.set("num", "5");
+  url.searchParams.set("api_key", key);
+
+  const r = await fetch(url, { next: { revalidate: 60 } });
+  if (!r.ok) throw new Error("serpapi news request failed");
+  const j = await r.json();
+
+  const results = (j.news_results || []).slice(0, 5).map((r) => ({
+    title: r.title,
+    link: r.link,
+    source: r.source,
+    date: r.date,
+    snippet: r.snippet,
+  }));
+
+  if (!results.length) return "_No recent articles found._";
+
+  return [
+    `**News for:** ${query}`,
+    "",
+    ...results.map(
+      (r, i) =>
+        `${i + 1}. [${r.title}](${r.link}) — ${r.source}${
+          r.date ? ` (${r.date})` : ""
+        }  \n   ${r.snippet ? r.snippet : ""}`
+    ),
+  ].join("\n");
+}
+
+async function doMapsSearch(query) {
+  const key = process.env.GOOGLE_PLACES_KEY;
+  if (!key) throw new Error("GOOGLE_PLACES_KEY missing");
+
+  const url = new URL(
+    "https://maps.googleapis.com/maps/api/place/textsearch/json"
+  );
+  url.searchParams.set("query", query);
+  url.searchParams.set("key", key);
+
+  const r = await fetch(url, { next: { revalidate: 300 } });
+  if (!r.ok) throw new Error("google places request failed");
+  const j = await r.json();
+
+  const results = (j.results || []).slice(0, 8).map((p) => ({
+    name: p.name,
+    address: p.formatted_address,
+    rating: p.rating,
+    total_ratings: p.user_ratings_total,
+    place_id: p.place_id,
+  }));
+
+  if (!results.length) return "_No places found._";
+
+  // Links to the Google Maps place by place_id
+  const lines = results.map((p, i) => {
+    const mapLink = `https://www.google.com/maps/place/?q=place_id:${p.place_id}`;
+    const rating =
+      p.rating && p.total_ratings
+        ? ` — ${p.rating}★ (${p.total_ratings})`
+        : "";
+    return `${i + 1}. **${p.name}**${rating}  \n   ${p.address}  \n   ${mapLink}`;
+  });
+
+  return ["**Google Maps results for:** " + query, "", ...lines].join("\n");
+}
+
+// ---- main handler ----------------------------------------------------------
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
-    res.setHeader("Allow", ["POST"]);
-    return res.status(405).json({ error: "Method Not Allowed" });
+    return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
     const { messages = [], role = "referrer" } = req.body || {};
     const last = messages[messages.length - 1];
-    const userText = (last?.content || "").trim();
+    const userText = (last && last.content) || "";
 
-    const origin = getOrigin(req);
-
-    // ---------------------------
     // Slash commands
-    // ---------------------------
-    // /search query → web search via /api/search-web
-    // /news query   → news search via /api/search-web?type=news
-    // /maps query   → Google Places via /api/maps-search
-    const slash = userText.startsWith("/")
-      ? userText.slice(1).split(/\s+/, 1)[0].toLowerCase()
-      : null;
-
-    if (slash === "search" || slash === "news") {
-      const query = userText.replace(/^\/(search|news)\s*/i, "").trim();
-      if (!query) {
-        return res.json({
-          content:
-            "Give me something to look up. Example:\n\n`/search best taco trucks in Nashville`",
-        });
-      }
-
-      const payload = { q: query, type: slash === "news" ? "news" : "search" };
-      const json = await postJSON(`${origin}/api/search-web`, payload);
-      const md = formatSearchResults(json, slash === "news" ? "news" : "web");
-      return res.json({ content: md });
+    // /search query    -> web search via SerpAPI (Google)
+    // /news query      -> news via SerpAPI (Google News)
+    // /maps query      -> Google Places textsearch
+    const slash = userText.trim().match(/^\/(search|news|maps)\s+(.+)/i);
+    if (slash) {
+      const [, cmd, query] = slash;
+      let md;
+      if (cmd === "search") md = await doWebSearch(query);
+      else if (cmd === "news") md = await doNewsSearch(query);
+      else md = await doMapsSearch(query);
+      return res.status(200).json({ reply: md });
     }
 
-    if (slash === "maps") {
-      const query = userText.replace(/^\/maps\s*/i, "").trim();
-      if (!query) {
-        return res.json({
-          content:
-            "Tell me what to find. Example:\n\n`/maps bbq caterers in Nashville`",
-        });
-      }
-      const json = await postJSON(`${origin}/api/maps-search`, { q: query });
-      const md = formatSearchResults(json, "Google Maps");
-      return res.json({ content: md });
-    }
-
-    // ---------------------------
-    // Normal AI reply (OpenAI)
-    // ---------------------------
-    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-    if (!OPENAI_API_KEY) {
-      return res.status(500).json({
-        error: "Missing OPENAI_API_KEY",
-        content:
-          "Server is missing `OPENAI_API_KEY`. Ask the admin to set it in Vercel.",
-      });
-    }
-
-    // Build the conversation for OpenAI
-    // Seed with a focused system prompt that knows about roles
+    // Normal chat -> OpenAI
     const sys = [
-      systemPrompt || "",
+      systemPrompt,
       "",
-      "You are CAPITALIZE's co-pilot. Keep answers concise, formatted in clean Markdown with headings and bullets when helpful.",
-      `Current console role: ${role}.`,
-      "If the user asks you to search, suggest `/search`, `/news`, or `/maps` commands (but only if they haven't used one already).",
-    ]
-      .filter(Boolean)
-      .join("\n");
+      `User role: ${role}`,
+      "Keep responses crisp, structured (use headings & bullets when useful), and action-forward.",
+    ].join("\n");
 
-    const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        temperature: 0.4,
-        messages: [
-          { role: "system", content: sys },
-          ...messages.map((m) => ({
-            role: m.role === "assistant" ? "assistant" : m.role,
-            content: String(m.content || ""),
-          })),
-        ],
-      }),
+    const chat = await openai.chat.completions.create({
+      model: "gpt-4o-mini", // fast + cheap; swap if you prefer
+      temperature: 0.3,
+      messages: [
+        { role: "system", content: sys },
+        ...messages.map((m) => ({
+          role: m.role === "assistant" || m.role === "ai" ? "assistant" : m.role,
+          content: String(m.content ?? ""),
+        })),
+      ],
     });
 
-    if (!openaiRes.ok) {
-      const text = await openaiRes.text().catch(() => "");
-      throw new Error(`OpenAI error: ${openaiRes.status} ${openaiRes.statusText} — ${text}`);
-    }
+    const reply =
+      chat.choices?.[0]?.message?.content?.trim() ||
+      "I’m here—share details and I’ll draft the next message.";
 
-    const data = await openaiRes.json();
-    const content =
-      data?.choices?.[0]?.message?.content ||
-      "Got it — give me more details and I’ll draft the next step.";
-
-    return res.json({ content });
+    return res.status(200).json({ reply });
   } catch (err) {
-    console.error("chat api error:", err);
-    return res.status(200).json({
-      content:
-        "_Couldn’t reach the server. Try again in a moment._\n\nIf this keeps happening, ping the team.",
-    });
+    console.error("api/chat error:", err);
+    return res
+      .status(200)
+      .json({
+        reply:
+          "_Couldn’t reach the server. Try again in a moment. If this keeps happening, ping the team._",
+      });
   }
-}
+      }
