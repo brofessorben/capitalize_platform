@@ -1,78 +1,53 @@
+// app/components/eventlist.jsx
 "use client";
+import React, { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
+import { useRouter } from "next/navigation";
 
-import { useEffect, useState } from "react";
-
-export default function EventList({ role = "referrer", activeId, onSelect }) {
+export default function EventList({ roleFilter }) {
   const [events, setEvents] = useState([]);
-  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const router = useRouter();
 
-  async function load() {
-    const res = await fetch(`/api/events?role=${role}`);
-    const { events } = await res.json();
-    setEvents(events || []);
-  }
+  useEffect(() => {
+    let sub;
+    const load = async () => {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("events")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (!error) setEvents((data || []).filter((e) => !roleFilter || e.role === roleFilter));
+      setLoading(false);
+    };
+    load();
 
-  useEffect(() => { load(); }, [role]);
+    // realtime on events table
+    sub = supabase
+      .channel("events-rt")
+      .on("postgres_changes", { event: "*", schema: "public", table: "events" }, load)
+      .subscribe();
 
-  async function createQuick() {
-    const title = prompt("Event title (e.g., 'Q3 Partner Mixer, 10/18'):");
-    if (!title) return;
-    setBusy(true);
-    try {
-      const res = await fetch("/api/events", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role, title, meta: {} }),
-      });
-      const { event, error } = await res.json();
-      if (error) alert(error);
-      else {
-        setEvents((e) => [event, ...e]);
-        onSelect?.(event.id);
-      }
-    } finally {
-      setBusy(false);
-    }
-  }
+    return () => {
+      if (sub) supabase.removeChannel(sub);
+    };
+  }, [roleFilter]);
+
+  if (loading) return <div className="text-zinc-400 text-sm">Loading events…</div>;
+  if (!events.length) return <div className="text-zinc-400 text-sm">No events yet.</div>;
 
   return (
-    <div className="mt-6 rounded-2xl border border-neutral-800 bg-neutral-900 p-4">
-      <div className="flex items-center justify-between mb-3">
-        <div className="text-sm font-semibold text-white uppercase tracking-wide">
-          {role} events
-        </div>
+    <div className="space-y-2">
+      {events.map((e) => (
         <button
-          onClick={createQuick}
-          disabled={busy}
-          className="text-xs px-3 py-1 rounded-lg bg-emerald-600 text-white disabled:opacity-60"
+          key={e.id}
+          onClick={() => router.push(`/chat/${e.id}`)}
+          className="w-full text-left rounded-xl bg-zinc-900/70 border border-zinc-800 px-4 py-3 hover:bg-zinc-900"
         >
-          + New
+          <div className="text-zinc-100 font-medium">{e.title}</div>
+          <div className="text-xs text-zinc-400">{e.role} • {new Date(e.created_at).toLocaleString()}</div>
         </button>
-      </div>
-
-      {events.length === 0 ? (
-        <div className="text-neutral-400 text-sm">No events yet. Create your first.</div>
-      ) : (
-        <ul className="space-y-2">
-          {events.map((e) => (
-            <li key={e.id}>
-              <button
-                onClick={() => onSelect?.(e.id)}
-                className={`w-full text-left px-3 py-2 rounded-lg border ${
-                  activeId === e.id
-                    ? "bg-neutral-800 border-emerald-600 text-white"
-                    : "bg-neutral-950 border-neutral-800 text-neutral-200 hover:bg-neutral-900"
-                }`}
-              >
-                <div className="text-sm font-medium">{e.title}</div>
-                <div className="text-xs text-neutral-400">
-                  {new Date(e.created_at).toLocaleString()}
-                </div>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      ))}
     </div>
   );
 }
