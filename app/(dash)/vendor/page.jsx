@@ -1,9 +1,15 @@
 "use client";
 
-import dynamic from "next/dynamic";
-
-const AIChatPage = dynamic(() => import("../../components/aichatpage"), { ssr: false });
+import { useState } from "react";
+import AIChatPage from "../../components/aichatpage";
+import EventList from "../../components/eventlist";
 
 export default function VendorDash() {
-  return <AIChatPage role="vendor" header="Vendor Console" />;
+  const [eventId, setEventId] = useState(null);
+  return (
+    <div className="max-w-6xl mx-auto p-4 md:p-6">
+      <AIChatPage role="vendor" header="Vendor Console" eventId={eventId} />
+      <EventList role="vendor" activeId={eventId} onSelect={setEventId} />
+    </div>
+  );
 }
