@@ -3,22 +3,18 @@ import { supabase } from "@/lib/supabaseClient";
 
 export async function GET(req: Request) {
   const role = new URL(req.url).searchParams.get("role") || "referrer";
+
+  // Example: return latest 20 events for this role
   const { data, error } = await supabase
     .from("events")
     .select("*")
     .eq("role", role)
-    .order("created_at", { ascending: false });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ events: data });
-}
+    .order("created_at", { ascending: false })
+    .limit(20);
 
-export async function POST(req: Request) {
-  const { role, title, meta } = await req.json();
-  const { data, error } = await supabase
-    .from("events")
-    .insert({ role, title, meta })
-    .select("*")
-    .single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ event: data });
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ events: data ?? [] });
 }
