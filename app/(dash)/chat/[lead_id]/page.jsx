@@ -1,11 +1,12 @@
 "use client";
 
-import AIChatPage from "@/app/components/aichatpage";
+import dynamic from "next/dynamic";
+import { useParams } from "next/navigation";
 
-export default function ChatForLead({ params, searchParams }) {
-  const { lead_id } = params;
-  const role = (searchParams?.role || "vendor").toLowerCase();
-  const header = `Chat — ${role.charAt(0).toUpperCase() + role.slice(1)}`;
+const AIChatPage = dynamic(() => import("../../../components/aichatpage"), { ssr: false });
 
-  return <AIChatPage role={role} header={header} leadId={lead_id} showLeadForm={role === "referrer"} />;
+export default function LeadChatPage() {
+  const params = useParams();
+  const id = params?.lead_id;
+  return <AIChatPage role="vendor" header={`Chat • Lead ${id || ""}`} />;
 }
