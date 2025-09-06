@@ -1,35 +1,74 @@
 "use client";
-import React from "react";
 
-export default function EventList({ items = [], activeId, onSelect, onNew }) {
+import React, { useEffect, useState } from "react";
+import { getSupabase } from "@/lib/supabaseClient";
+
+export default function EventList({ role = "referrer", onSelect }) {
+  const supabase = getSupabase();
+  const [rows, setRows] = useState([]);
+
+  useEffect(() => {
+    let off = false;
+    const load = async () => {
+      const { data } = await supabase
+        .from("events")
+        .select("*")
+        .eq("role", role)
+        .order("updated_at", { ascending: false })
+        .limit(20);
+      if (!off) setRows(data || []);
+    };
+    load();
+
+    const ch = supabase
+      .channel(`events-${role}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "events", filter: `role=eq.${role}` },
+        load
+      )
+      .subscribe();
+
+    return () => {
+      off = true;
+      supabase.removeChannel(ch);
+    };
+  }, [role, supabase]);
+
+  async function newThread() {
+    const r = await fetch("/api/events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "New Thread", role }),
+    });
+    const j = await r.json();
+    onSelect?.(j?.id);
+  }
+
   return (
-    <div className="mt-4 rounded-md border border-[#203227] bg-[#0b0f0d]">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-[#203227]">
-        <span className="font-medium text-[#cdebd9]">Your Threads</span>
+    <div className="rounded-xl border border-[#203227] bg-[#0b0f0d]">
+      <div className="flex items-center justify-between px-4 py-3">
+        <div className="text-[#cdebd9] font-semibold">Your Threads</div>
         <button
-          onClick={onNew}
-          className="rounded-md bg-[#163626] hover:bg-[#1b4431] px-2.5 py-1 text-sm"
+          className="rounded-md bg-[#103221] border border-[#1f3b2d] px-3 py-1 text-[#c9fdd7] hover:bg-[#143021]"
+          onClick={newThread}
         >
           + New Thread
         </button>
       </div>
 
-      {items.length === 0 ? (
-        <div className="px-3 py-3 text-sm text-[#9ccbb4]">No threads yet. Make one!</div>
+      {rows.length === 0 ? (
+        <div className="px-4 pb-4 text-sm text-slate-400">No threads yet. Make one!</div>
       ) : (
-        <ul className="divide-y divide-[#1b2a22]">
-          {items.map((ev) => (
-            <li key={ev.id}>
+        <ul className="px-2 pb-3 space-y-1">
+          {rows.map((r) => (
+            <li key={r.id}>
               <button
-                onClick={() => onSelect?.(ev)}
-                className={`w-full text-left px-3 py-2 hover:bg-[#0e1512] ${
-                  activeId === ev.id ? "bg-[#101a16]" : ""
-                }`}
+                onClick={() => onSelect?.(r.id)}
+                className="w-full text-left rounded-md px-3 py-2 hover:bg-[#0f1a14] border border-transparent hover:border-[#1f3b2d] text-[#d7efe2]"
+                title={r.title}
               >
-                <div className="text-[#d5f5e6]">{ev.title}</div>
-                <div className="text-xs text-[#8fbfaa]">
-                  {ev.status ?? "open"} • {new Date(ev.updated_at || ev.created_at).toLocaleString()}
-                </div>
+                {r.title}
               </button>
             </li>
           ))}
