@@ -1,12 +1,17 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
-// Make sure these env vars are set in Vercel: 
-// SUPABASE_URL and SUPABASE_ANON_KEY
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+let _client: SupabaseClient | null = null;
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error("Missing Supabase environment variables. Check your Vercel project settings.");
+export function getSupabase(): SupabaseClient {
+  if (_client) return _client;
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!url || !key) {
+    console.error("[Supabase] Missing env vars. Check your Vercel settings.");
+  }
+
+  _client = createClient(url ?? "https://example.supabase.co", key ?? "invalid-key");
+  return _client;
 }
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
