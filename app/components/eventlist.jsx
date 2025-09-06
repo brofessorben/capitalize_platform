@@ -1,43 +1,45 @@
 // app/components/eventlist.jsx
 "use client";
-
 import React from "react";
 
-export default function EventList({ items = [], selectedId, onSelect, onNew }) {
+export default function EventList({ threads = [], selectedId, onSelect, onNew }) {
   return (
-    <div className="mt-6 rounded-2xl border border-[#24322a] bg-[#0e1512]/60">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-[#24322a]">
-        <h3 className="text-sm font-semibold text-[#c9fdd7] tracking-wide">Your Threads</h3>
+    <div className="mt-8 rounded-xl border border-[#233] bg-[#0f1412]">
+      <div className="flex items-center justify-between px-4 py-3">
+        <div className="font-semibold text-[#c9fdd7]">Your Threads</div>
         <button
           onClick={onNew}
-          className="text-xs rounded-md px-3 py-1 border border-[#2b4b3a] bg-[#0f1a14] text-[#baf7ca] hover:bg-[#143021] transition"
+          className="rounded-md bg-[#14452f] px-3 py-1 text-sm font-medium text-[#c9fdd7] hover:bg-[#1b5a3d]"
         >
           + New Thread
         </button>
       </div>
 
-      <ul className="divide-y divide-[#24322a]">
-        {items.length === 0 && (
-          <li className="px-4 py-4 text-sm text-[#9ccbb0]">No threads yet. Make one!</li>
-        )}
-        {items.map((e) => (
-          <li key={e.id}>
-            <button
-              onClick={() => onSelect?.(e.id)}
-              className={`w-full text-left px-4 py-3 transition ${
-                selectedId === e.id
-                  ? "bg-[#13231b] text-[#d8ffe6]"
-                  : "hover:bg-[#101713] text-[#c2e9d2]"
-              }`}
-            >
-              <div className="text-sm font-medium truncate">{e.title}</div>
-              <div className="text-xs text-[#8fbfa5]">
-                {new Date(e.updated_at || e.created_at).toLocaleString()}
-              </div>
-            </button>
-          </li>
-        ))}
-      </ul>
+      <div className="border-t border-[#1b2a24]" />
+
+      {threads.length === 0 ? (
+        <div className="p-4 text-sm text-[#9fb8ac]">No threads yet. Make one!</div>
+      ) : (
+        <ul className="p-2">
+          {threads.map((t) => (
+            <li key={t.id}>
+              <button
+                onClick={() => onSelect?.(t)}
+                className={`w-full rounded-lg px-3 py-2 text-left transition ${
+                  selectedId === t.id
+                    ? "bg-[#173426] text-[#d7ffe6] border border-[#23513b]"
+                    : "bg-transparent text-[#bfead1] hover:bg-[#13271e]"
+                }`}
+              >
+                <div className="text-sm font-medium truncate">{t.title}</div>
+                <div className="text-xs opacity-70 mt-0.5">
+                  {t.role} • {t.status}
+                </div>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
