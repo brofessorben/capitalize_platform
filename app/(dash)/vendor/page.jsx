@@ -2,12 +2,14 @@
 
 import dynamic from "next/dynamic";
 
-// RELATIVE import (no alias)
-const AIChatPage = dynamic(
-  () => import("../../components/aichatpage"),
-  { ssr: false }
-);
+const AIChatPage = dynamic(() => import("../../components/aichatpage"), { ssr: false });
+const EventList = dynamic(() => import("../../components/eventlist"), { ssr: false });
 
 export default function VendorDash() {
-  return <AIChatPage role="vendor" header="Vendor Console" />;
+  return (
+    <div className="space-y-6">
+      <AIChatPage role="vendor" header="Vendor Console" />
+      <EventList events={[{ title: "Proposal: Amy’s Wedding", date: "Oct 17, 2025" }]} />
+    </div>
+  );
 }
