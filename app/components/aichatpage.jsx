@@ -1,149 +1,159 @@
+// app/components/aichatpage.jsx
 "use client";
+import React, { useEffect, useRef, useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
+import ChatBubble from "./ChatBubble";           // your existing .tsx component
+import LeadQuickCapture from "./LeadQuickCapture"; // keep if you want the form
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import ChatBubble from "./ChatBubble";
-import { ensureThread, fetchMessages, addMessage } from "@/lib/chatStore";
+function stripPolite(text) {
+  return String(text || "")
+    .replace(/^\s*(hey|hi|hello|please|can you|could you|would you)\b[:,\s]*/i, "")
+    .trim();
+}
 
-// fun seeds per role
-const seeds = {
-  referrer:
-    "Yo! I’m your CAPITALIZE co-pilot. Drop who you’re connecting (vendor + host + context). I’ll draft a clean intro and keep momentum rolling.",
-  vendor:
-    "Vendor console loaded. Paste lead details (event, date, headcount, budget, location, notes) and I’ll craft a slick reply/proposal.",
-  host:
-    "Welcome! Tell me about your event (date, headcount, budget, vibe, constraints). I’ll draft a tight vendor request/proposal.",
-};
+export default function AIChatPage({ role = "referrer", header = "Console", eventId }) {
+  const [messages, setMessages] = useState([]);
+  const [draft, setDraft] = useState("");
+  const [activeEventId, setActiveEventId] = useState(eventId || null);
+  const [loading, setLoading] = useState(false);
+  const listRef = useRef(null);
 
-export default function AIChatPage({
-  role = "referrer",
-  header = "Console",
-  eventId,               // <- pass me to bind this chat to that event
-}) {
-  const [thread, setThread] = useState(null);
-  const [messages, setMessages] = useState([
-    { sender: "assistant", content: seeds[role] || seeds.referrer },
-  ]);
-  const [busy, setBusy] = useState(false);
-  const [input, setInput] = useState("");
-
-  const taRef = useRef(null);
-
-  // grow textarea
+  // auto-create a thread if none was passed (so dashboard can chat instantly)
   useEffect(() => {
-    const el = taRef.current;
-    if (!el) return;
-    el.style.height = "0px";
-    el.style.height = Math.min(el.scrollHeight, 240) + "px";
-  }, [input]);
+    const ensureEvent = async () => {
+      if (activeEventId) return;
+      const { data, error } = await supabase
+        .from("events")
+        .insert([{ title: `Quick Chat — ${new Date().toLocaleString()}`, role, status: "open" }])
+        .select("id")
+        .single();
+      if (!error && data?.id) setActiveEventId(data.id);
+    };
+    ensureEvent();
+  }, [activeEventId, role]);
 
-  // stable thread key per browser
-  const threadKey = useMemo(() => {
-    const k = `cap_thread_key_${role}`;
-    let v = localStorage.getItem(k);
-    if (!v) {
-      v = crypto.randomUUID();
-      localStorage.setItem(k, v);
-    }
-    return v;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [role]);
-
-  // when eventId changes, ensure thread + load history
+  // load + subscribe to messages for the active event
   useEffect(() => {
-    if (!eventId) return; // nothing selected yet
-    (async () => {
-      const t = await ensureThread(eventId, role, threadKey);
-      setThread(t);
-      const hist = await fetchMessages(t.id);
-      if (hist.length) {
-        setMessages(hist.map(m => ({ sender: m.sender, content: m.content })));
-      } else {
-        // seed again for a fresh thread
-        setMessages([{ sender: "assistant", content: seeds[role] || seeds.referrer }]);
-      }
-    })();
-  }, [eventId, role, threadKey]);
+    if (!activeEventId) return;
 
-  async function send() {
-    const text = input.trim();
-    if (!text || busy || !thread) return;
-    setInput("");
-    setBusy(true);
+    let sub;
+    const load = async () => {
+      const { data, error } = await supabase
+        .from("messages")
+        .select("*")
+        .eq("event_id", activeEventId)
+        .order("created_at", { ascending: true });
+      if (!error) setMessages(data || []);
+      // scroll to bottom
+      setTimeout(() => listRef.current?.scrollTo({ top: 1e9, behavior: "smooth" }), 50);
+    };
+    load();
 
-    // push user + persist
-    setMessages(m => [...m, { sender: "user", content: text }]);
-    await addMessage(thread.id, "user", text);
+    sub = supabase
+      .channel(`msg-${activeEventId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "messages", filter: `event_id=eq.${activeEventId}` },
+        load
+      )
+      .subscribe();
 
-    try {
-      // ask our /api/chat with all prior context
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          role,
-          messages: [
-            ...messages.map(m => ({
-              role: m.sender === "assistant" ? "assistant" : "user",
-              content: m.content,
-            })),
-            { role: "user", content: text },
-          ],
-        }),
-      });
-      const data = await res.json();
-      const reply = data.reply || "I’m here—share details and I’ll draft the next move.";
-      setMessages(m => [...m, { sender: "assistant", content: reply }]);
-      await addMessage(thread.id, "assistant", reply);
-    } catch {
-      const fallback = "_Couldn’t reach the server. Try again soon._";
-      setMessages(m => [...m, { sender: "assistant", content: fallback }]);
-      await addMessage(thread.id, "assistant", fallback);
-    } finally {
-      setBusy(false);
-    }
+    return () => {
+      if (sub) supabase.removeChannel(sub);
+    };
+  }, [activeEventId]);
+
+  async function sendMessage() {
+    const text = stripPolite(draft);
+    if (!text) return;
+
+    setDraft("");
+    setLoading(true);
+
+    // Optimistic add of user msg
+    const localUser = {
+      id: crypto.randomUUID(),
+      event_id: activeEventId,
+      role,
+      content: text,
+      created_at: new Date().toISOString(),
+    };
+    setMessages((m) => [...m, localUser]);
+
+    // Call API -> will store both the user + assistant messages
+    const r = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: messages.concat(localUser).map(({ role, content }) => ({ role, content })),
+        role,
+        eventId: activeEventId,
+      }),
+    });
+    const j = await r.json();
+    // On success, realtime will pull assistant reply; nothing else to do.
+    setLoading(false);
   }
 
   return (
-    <div className="mx-auto max-w-4xl p-4 md:p-6">
-      <div className="text-xl font-semibold mb-4 text-white">{header}</div>
+    <div className="max-w-3xl mx-auto">
+      <h2 className="text-xl font-semibold text-zinc-100 mb-4">{header}</h2>
 
-      <div className="space-y-3 mb-4">
-        {messages.map((m, i) => (
-          <ChatBubble key={i} role={m.sender === "user" ? "user" : "ai"} content={m.content} />
+      <div className="rounded-2xl bg-zinc-900/70 border border-zinc-800 p-4 mb-3 text-zinc-200">
+        {role === "referrer" && (
+          <div>
+            Yo! I’m your CAPITALIZE co-pilot. Drop vendor + host details (names, contacts, event info) and I’ll draft the intro for you.
+          </div>
+        )}
+        {role === "vendor" && (
+          <div>
+            Welcome to your vendor console. Paste the lead details (event, date, headcount, budget, location, notes) and I’ll draft a sharp reply or proposal.
+          </div>
+        )}
+        {role === "host" && (
+          <div>
+            Welcome! Tell me what you’re planning (event, date, headcount, budget, location, vibe). I’ll generate a clean vendor request.
+          </div>
+        )}
+        <div className="text-xs text-emerald-400 mt-2">Tip: use <code>/search</code>, <code>/news</code>, <code>/maps</code></div>
+      </div>
+
+      {/* messages */}
+      <div
+        ref={listRef}
+        className="rounded-2xl bg-zinc-950/50 border border-zinc-800 p-3 h-[50vh] overflow-y-auto space-y-2"
+      >
+        {messages.map((m) => (
+          <ChatBubble key={m.id} role={m.role} content={m.content} />
         ))}
-        {busy && <ChatBubble role="ai" content="_Typing…_" />}
-        {!eventId && (
-          <ChatBubble
-            role="ai"
-            content="Pick an event below to load its chat thread (or create a new event)."
-          />
+        {!messages.length && (
+          <div className="text-sm text-zinc-400">No messages yet. Say hi 👋</div>
         )}
       </div>
 
-      <div className="flex items-end gap-2">
-        <textarea
-          ref={taRef}
-          disabled={!eventId}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
+      {/* input */}
+      <div className="flex gap-2 mt-3">
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            // Enter adds newline; Cmd/Ctrl+Enter sends
-            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-              e.preventDefault();
-              send();
-            }
-          })}
-          placeholder={eventId ? "Type your message… (Cmd/Ctrl+Enter to send)" : "Select an event…"}
-          className="flex-1 min-h-[44px] max-h-[240px] resize-none rounded-xl bg-neutral-800 text-white placeholder-neutral-400 border border-neutral-700 px-3 py-2 disabled:opacity-50"
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") sendMessage();
+          }}
+          placeholder="Type it. I’ll make it shine. (Cmd/Ctrl+Enter to send)"
+          className="flex-1 rounded-xl bg-zinc-900/70 border border-zinc-800 px-4 py-3 text-zinc-100 placeholder-zinc-500 focus:outline-none"
         />
         <button
-          onClick={send}
-          disabled={busy || !eventId}
-          className="px-4 py-2 rounded-xl bg-emerald-600 text-white disabled:opacity-60"
-          aria-label="Send"
+          onClick={sendMessage}
+          disabled={!draft || loading}
+          className="px-4 py-3 rounded-xl bg-emerald-600 text-white font-medium disabled:opacity-50"
         >
-          {busy ? "…" : "Send"}
+          {loading ? "…" : "Send"}
         </button>
+      </div>
+
+      {/* Optional capture block */}
+      <div className="mt-6">
+        <LeadQuickCapture />
       </div>
     </div>
   );
