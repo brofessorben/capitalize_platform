@@ -1,8 +1,12 @@
-import { createClient } from "@supabase/supabase-js";
+// /lib/supabaseAdmin.ts
+import { createClient } from '@supabase/supabase-js';
 
-const url   = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const sKey  = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const url = process.env.SUPABASE_URL!;
+const key = process.env.SUPABASE_SERVICE_ROLE_KEY!; // server-only
 
-export const supabaseAdmin = createClient(url, sKey, {
+if (!url) throw new Error('SUPABASE_URL is required.');
+if (!key) throw new Error('SUPABASE_SERVICE_ROLE_KEY is required.');
+
+export const supabaseAdmin = createClient(url, key, {
   auth: { persistSession: false },
 });
