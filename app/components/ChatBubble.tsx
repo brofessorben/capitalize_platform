@@ -1,7 +1,6 @@
 // app/components/ChatBubble.tsx
 "use client";
 import React from "react";
-import clsx from "clsx";
 
 type Props = {
   role: "referrer" | "vendor" | "host" | "assistant" | string;
@@ -16,11 +15,12 @@ const palette: Record<string, { chip: string; bubble: string }> = {
 };
 
 export default function ChatBubble({ role, content }: Props) {
-  const c = palette[role] || palette.assistant;
+  const theme = palette[role] || palette.assistant;
+
   return (
-    <div className={clsx("rounded-xl p-3 border border-[#223]", c.bubble)}>
+    <div className={`rounded-xl p-3 border border-[#223] ${theme.bubble}`}>
       <div className="mb-1 inline-flex items-center gap-2">
-        <span className={clsx("text-xs px-2 py-0.5 rounded-full text-white", c.chip)}>
+        <span className={`text-xs px-2 py-0.5 rounded-full text-white ${theme.chip}`}>
           {role === "assistant" ? "CAPITALIZE" : role}
         </span>
       </div>
