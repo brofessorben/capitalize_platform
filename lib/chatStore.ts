@@ -1,49 +1,53 @@
 // lib/chatStore.ts
-import { getSupabase } from "./supabaseClient";
+import { getServerSupabase, getSupabase } from "./supabaseClient";
 
-/** List most-recent events for a role */
-export async function listEvents(role: string) {
+/** THREADS (aka events) */
+export async function listThreads(role: string) {
   const supabase = getSupabase();
-  const { data, error } = await supabase
-    .from("events")
+  return supabase.from("events")
     .select("*")
     .eq("role", role)
-    .order("updated_at", { ascending: false })
-    .limit(50);
-  if (error) throw error;
-  return data || [];
+    .order("updated_at", { ascending: false });
 }
 
-/** Create a new event/thread */
-export async function createEvent(title: string, role: string) {
+export async function createThread(title: string, role: string) {
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from("events")
-    .insert({ title, role })
-    .select()
+    .insert([{ title, role, status: "open" }])
+    .select("*")
     .single();
-  if (error) throw error;
-  return data;
+  return { data, error };
 }
 
-/** Load messages for an event */
-export async function listMessages(event_id: string) {
+/** MESSAGES */
+export async function listMessages(threadId: string) {
   const supabase = getSupabase();
-  const { data, error } = await supabase
+  return supabase
     .from("messages")
     .select("*")
-    .eq("event_id", event_id)
+    .eq("event_id", threadId)
     .order("created_at", { ascending: true });
-  if (error) throw error;
-  return data || [];
 }
 
-/** Add a message + bump event.updated_at */
-export async function addMessage(event_id: string, role: string, content: string) {
+export async function sendMessage(threadId: string, sender: string, content: string) {
   const supabase = getSupabase();
-  const { error } = await supabase
+  return supabase
     .from("messages")
-    .insert({ event_id, role, content });
-  if (error) throw error;
-  await supabase.from("events").update({ updated_at: new Date().toISOString() }).eq("id", event_id);
+    .insert([{ event_id: threadId, role: sender, content }])
+    .select("*")
+    .single();
+}
+
+/** REALTIME subscription to a thread */
+export function subscribeMessages(threadId: string, onInsert: (row: any) => void) {
+  const supabase = getSupabase();
+  const channel = supabase
+    .channel(`messages-${threadId}`)
+    .on("postgres_changes",
+      { event: "INSERT", schema: "public", table: "messages", filter: `event_id=eq.${threadId}` },
+      (payload) => onInsert(payload.new)
+    )
+    .subscribe();
+  return () => supabase.removeChannel(channel);
 }
