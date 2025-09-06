@@ -1,35 +1,43 @@
+// app/components/eventlist.jsx
 "use client";
-import React, { useEffect, useState } from "react";
-import { getSupabase } from "@/lib/supabaseClient";
 
-export default function EventList({ role, onOpen }) {
-  const [events, setEvents] = useState([]);
+import React from "react";
 
-  useEffect(() => {
-    const supabase = getSupabase();
-    const load = async () => {
-      const { data } = await supabase
-        .from("events")
-        .select("*")
-        .eq("role", role)
-        .order("created_at", { ascending: false });
-      setEvents(data || []);
-    };
-    load();
-  }, [role]);
-
+export default function EventList({ items = [], selectedId, onSelect, onNew }) {
   return (
-    <div className="mt-6 space-y-2">
-      {events.map((e) => (
+    <div className="mt-6 rounded-2xl border border-[#24322a] bg-[#0e1512]/60">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-[#24322a]">
+        <h3 className="text-sm font-semibold text-[#c9fdd7] tracking-wide">Your Threads</h3>
         <button
-          key={e.id}
-          onClick={() => onOpen?.(e)}
-          className="w-full text-left bg-neutral-900/60 hover:bg-neutral-800 rounded-xl px-4 py-3 border border-neutral-700"
+          onClick={onNew}
+          className="text-xs rounded-md px-3 py-1 border border-[#2b4b3a] bg-[#0f1a14] text-[#baf7ca] hover:bg-[#143021] transition"
         >
-          <div className="font-semibold">{e.title}</div>
-          <div className="text-xs text-neutral-400">{e.status}</div>
+          + New Thread
         </button>
-      ))}
+      </div>
+
+      <ul className="divide-y divide-[#24322a]">
+        {items.length === 0 && (
+          <li className="px-4 py-4 text-sm text-[#9ccbb0]">No threads yet. Make one!</li>
+        )}
+        {items.map((e) => (
+          <li key={e.id}>
+            <button
+              onClick={() => onSelect?.(e.id)}
+              className={`w-full text-left px-4 py-3 transition ${
+                selectedId === e.id
+                  ? "bg-[#13231b] text-[#d8ffe6]"
+                  : "hover:bg-[#101713] text-[#c2e9d2]"
+              }`}
+            >
+              <div className="text-sm font-medium truncate">{e.title}</div>
+              <div className="text-xs text-[#8fbfa5]">
+                {new Date(e.updated_at || e.created_at).toLocaleString()}
+              </div>
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
