@@ -1,157 +1,147 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getSupabase } from "@/lib/supabaseClient";
 import ChatBubble from "./ChatBubble";
 import LeadQuickCapture from "./LeadQuickCapture";
-import SuggestedPrompts from "./suggestedprompts";
-import EventList from "./eventlist";
+import SuggestedPrompts from "./suggestedpromts";
+import EventList from "./eventlist"; // the bottom thread list
 
-export default function AIChatPage({ role = "referrer", header = "Console" }) {
+export default function AIChatPage({ role, header }) {
   const supabase = getSupabase();
-  const [threads, setThreads] = useState([]);             // events rows
-  const [activeThread, setActiveThread] = useState(null); // { id, title, role, ... }
-  const [messages, setMessages] = useState([]);           // messages for active thread
+
+  const [threadId, setThreadId] = useState(null);
+  const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const [suggestions, setSuggestions] = useState([]);
   const endRef = useRef(null);
 
-  // load thread list for this role
+  // load + realtime for current thread
   useEffect(() => {
-    const loadThreads = async () => {
-      const { data } = await supabase
-        .from("events")
-        .select("*")
-        .eq("role", role)
-        .order("updated_at", { ascending: false });
-      setThreads(data || []);
-    };
-    loadThreads();
+    if (!threadId) return;
+    let cancelled = false;
 
-    // realtime thread updates
-    const ev = supabase
-      .channel("events-rt")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "events", filter: `role=eq.${role}` },
-        () => loadThreads()
-      )
-      .subscribe();
-    return () => supabase.removeChannel(ev);
-  }, [role, supabase]);
-
-  // load messages for the active thread
-  useEffect(() => {
-    if (!activeThread?.id) {
-      setMessages([]);
-      return;
-    }
-
-    const loadMsgs = async () => {
-      const { data } = await supabase
+    const load = async () => {
+      const { data, error } = await supabase
         .from("messages")
         .select("*")
-        .eq("event_id", activeThread.id)
+        .eq("event_id", threadId)
         .order("created_at", { ascending: true });
-      setMessages(data || []);
+      if (!cancelled && !error) setMessages(data || []);
     };
-    loadMsgs();
+    load();
 
     const ch = supabase
-      .channel(`messages-${activeThread.id}`)
+      .channel(`realtime-messages-${threadId}`)
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages", filter: `event_id=eq.${activeThread.id}` },
+        { event: "INSERT", schema: "public", table: "messages", filter: `event_id=eq.${threadId}` },
         (payload) => setMessages((m) => [...m, payload.new])
       )
       .subscribe();
 
-    return () => supabase.removeChannel(ch);
-  }, [activeThread, supabase]);
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(ch);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadId]);
 
+  // auto-scroll
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length]);
+  }, [messages]);
 
-  // ensures a thread exists; creates one if not
-  const ensureThread = async () => {
-    if (activeThread?.id) return activeThread;
+  // adaptive suggestions: fall back to bank until server returns smarter ones
+  const lastUserMsg = useMemo(() => {
+    const rev = [...messages].reverse();
+    return rev.find((m) => m.role !== "assistant")?.content || "";
+  }, [messages]);
 
-    const title = input.trim() || "New Thread";
-    const { data, error } = await supabase
-      .from("events")
-      .insert([{ title, role, status: "open" }])
-      .select()
-      .single();
-
-    if (error) {
-      console.error("create thread error", error);
-      return null;
-    }
-    setActiveThread(data);
-    return data;
+  const defaultBank = {
+    referrer: [
+      "Draft an intro between vendor + host",
+      "Summarize this lead and next steps",
+      "Find 3 local vendors with menus",
+      "Turn this into a text I can send",
+      "Write a tight follow-up",
+    ],
+    vendor: [
+      "Make good/better/best packages",
+      "Ask 5 clarifying questions",
+      "Turn this into a proposal",
+      "Spin a short pitch email",
+    ],
+    host: [
+      "Turn this plan into a vendor request",
+      "Suggest 3 matching vendors",
+      "Create a simple timeline",
+      "List hidden costs to watch",
+    ],
   };
+  const seedSuggestions = suggestions.length ? suggestions : (defaultBank[role] || defaultBank.referrer);
 
-  const send = async (text) => {
-    const content = (text ?? input).trim();
-    if (!content) return;
+  async function ensureThread(title) {
+    if (threadId) return threadId;
+    const r = await fetch("/api/events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: title?.slice(0, 120) || "New Thread", role }),
+    });
+    const j = await r.json();
+    setThreadId(j?.id);
+    return j?.id;
+  }
 
-    const thread = await ensureThread();
-    if (!thread) return;
+  async function send(text) {
+    const msg = (text ?? input).trim();
+    if (!msg || sending) return;
+    setSending(true);
 
+    // create thread on first send
+    const id = await ensureThread(msg);
+
+    // optimistic user bubble
+    setMessages((m) => [...m, { id: `tmp-${Date.now()}`, event_id: id, role, content: msg }]);
     setInput("");
 
-    const { error } = await supabase.from("messages").insert([
-      {
-        event_id: thread.id,
-        role,          // who is speaking: referrer | vendor | host
-        content,
-      },
-    ]);
-    if (error) console.error("send error", error);
+    // hit API -> OpenAI (+ optional web)
+    const r = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ thread_id: id, role, content: msg, allow_web: true }),
+    }).catch(() => null);
 
-    // Optimistic thread bump
-    await supabase.from("events").update({ updated_at: new Date().toISOString() }).eq("id", thread.id);
-  };
-
-  const createThread = async () => {
-    const title = prompt("Thread title?") || "New Thread";
-    const { data, error } = await supabase
-      .from("events")
-      .insert([{ title, role, status: "open" }])
-      .select()
-      .single();
-    if (error) return console.error("new thread error", error);
-    setActiveThread(data);
-  };
-
-  const lastMsg = messages[messages.length - 1];
+    if (r?.ok) {
+      const j = await r.json();
+      if (Array.isArray(j?.suggestions)) setSuggestions(j.suggestions);
+      // assistant message is inserted server-side; realtime will append it
+    }
+    setSending(false);
+  }
 
   return (
-    <div className="flex flex-col min-h-[80vh] text-white">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-[#203227] bg-[#0b0f0d]">
+    <div className="flex flex-col gap-4">
+      <header className="flex items-center justify-between">
         <h2 className="text-xl font-semibold">{header}</h2>
+        {/* quick-create thread */}
         <button
-          onClick={createThread}
-          className="rounded-md bg-[#163626] hover:bg-[#1b4431] px-3 py-1.5 text-sm"
+          className="rounded-md bg-[#103221] border border-[#1f3b2d] px-3 py-1 text-[#c9fdd7] hover:bg-[#143021]"
+          onClick={() => setThreadId(null)}
+          title="Start a fresh thread on next send"
         >
           + New Thread
         </button>
-      </div>
+      </header>
 
-      {/* Contextual prompts */}
-      <div className="px-4 pt-3">
-        <SuggestedPrompts
-          role={role}
-          lastMessage={lastMsg?.content || ""}
-          onPick={(t) => send(t)}
-          compact={false}
-        />
-      </div>
+      {/* static seed suggestions (top) */}
+      <SuggestedPrompts role={role} compact onPick={(t) => send(t)} />
 
-      {/* Chat stream */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-        {!activeThread && (
-          <div className="rounded-md border border-[#1f2b24] bg-[#0f1713] p-4 text-[#cdebd9]">
+      {/* chat stream */}
+      <div className="min-h-[220px] rounded-xl border border-[#203227] bg-[#0b0f0d] p-3 space-y-3">
+        {messages.length === 0 && (
+          <div className="rounded-md border border-[#1f3b2d] bg-[#0f1a14] px-3 py-2 text-[#b8eacd]">
             Pick a thread below or just start typing — I’ll spin up a new one.
           </div>
         )}
@@ -161,41 +151,43 @@ export default function AIChatPage({ role = "referrer", header = "Console" }) {
         <div ref={endRef} />
       </div>
 
-      {/* Input row */}
-      <div className="px-4 pb-4">
-        <div className="flex gap-2">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => (e.key === "Enter" && !e.shiftKey ? send() : null)}
-            placeholder={activeThread ? "Type it. I’ll make it shine…" : "Type to start a new thread…"}
-            className="flex-1 rounded-md bg-[#0e1720] border border-[#213345] px-3 py-2"
-          />
+      {/* adaptive suggestions (below last message) */}
+      <div className="flex flex-wrap gap-2">
+        {seedSuggestions.map((t, i) => (
           <button
-            onClick={() => send()}
-            className="rounded-md bg-emerald-600 hover:bg-emerald-700 px-4 py-2 font-semibold"
+            key={i}
+            onClick={() => send(t)}
+            className="rounded-full px-3 py-1 text-sm bg-[#0f1a14] border border-[#1f3b2d] text-[#c9fdd7] hover:bg-[#143021] transition"
           >
-            Send
+            {t}
           </button>
-        </div>
+        ))}
       </div>
 
-      {/* Lead capture only for referrers */}
-      {role === "referrer" && (
-        <div className="px-4 pb-4">
-          <LeadQuickCapture />
-        </div>
-      )}
-
-      {/* Thread list */}
-      <div className="px-4 pb-8">
-        <EventList
-          items={threads}
-          activeId={activeThread?.id}
-          onSelect={(ev) => setActiveThread(ev)}
-          onNew={createThread}
+      {/* composer */}
+      <div className="flex gap-2">
+        <input
+          className="flex-1 rounded-md bg-[#0e1720] border border-[#213345] px-3 py-2 text-white placeholder-slate-400"
+          placeholder={threadId ? "Type your message…" : "Type to start a new thread…"}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => (e.key === "Enter" && !e.shiftKey ? (e.preventDefault(), send()) : null)}
+          disabled={sending}
         />
+        <button
+          className="rounded-md bg-emerald-600 hover:bg-emerald-700 px-4 py-2 font-semibold text-white disabled:opacity-50"
+          onClick={() => send()}
+          disabled={sending}
+        >
+          {sending ? "Sending…" : "Send"}
+        </button>
       </div>
+
+      {/* referrer-only capture */}
+      {role === "referrer" && <LeadQuickCapture />}
+
+      {/* bottom threads list */}
+      <EventList role={role} onSelect={(id) => setThreadId(id)} />
     </div>
   );
 }
