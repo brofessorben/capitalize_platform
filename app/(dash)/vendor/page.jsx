@@ -2,15 +2,18 @@
 
 import dynamic from "next/dynamic";
 
-const AIChatPage = dynamic(() => import("../../components/aichatpage"), { ssr: false });
-const EventList   = dynamic(() => import("../../components/eventlist"),   { ssr: false });
+const AIChatPage = dynamic(() => import("../../components/aichatpage"), {
+  ssr: false,
+});
+const EventList = dynamic(() => import("../../components/eventlist"), {
+  ssr: false,
+});
 
 export default function VendorDash() {
   return (
-    <div className="max-w-6xl mx-auto px-4 pb-20">
+    <div className="min-h-[100vh] flex flex-col">
       <AIChatPage role="vendor" header="Vendor Console" />
-      <div className="mt-10" />
-      <EventList />
+      <EventList role="vendor" />
     </div>
   );
 }
