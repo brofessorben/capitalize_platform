@@ -2,13 +2,18 @@
 
 import dynamic from "next/dynamic";
 
-const AIChatPage = dynamic(() => import("../../../components/aichatpage"), { ssr: false });
+const AIChatPage = dynamic(() => import("../../../components/aichatpage"), {
+  ssr: false,
+});
 
-export default function LeadChatPage({ params }) {
+export default function ChatForLead({ params }) {
   const { lead_id } = params || {};
   return (
-    <div className="max-w-6xl mx-auto px-4 pb-20">
-      <AIChatPage role="referrer" header={`Chat • ${lead_id || "Lead"}`} />
+    <div className="min-h-[100vh] flex flex-col">
+      <AIChatPage
+        role="referrer"
+        header={`Chat · Lead ${lead_id}`}
+      />
     </div>
   );
 }
