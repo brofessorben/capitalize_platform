@@ -2,16 +2,19 @@
 
 import dynamic from "next/dynamic";
 
-// relative imports (no alias)
-const AIChatPage = dynamic(() => import("../../components/aichatpage"), { ssr: false });
-const EventList   = dynamic(() => import("../../components/eventlist"),   { ssr: false });
+// client components
+const AIChatPage = dynamic(() => import("../../components/aichatpage"), {
+  ssr: false,
+});
+const EventList = dynamic(() => import("../../components/eventlist"), {
+  ssr: false,
+});
 
 export default function ReferrerDash() {
   return (
-    <div className="max-w-6xl mx-auto px-4 pb-20">
+    <div className="min-h-[100vh] flex flex-col">
       <AIChatPage role="referrer" header="Referrer Console" />
-      <div className="mt-10" />
-      <EventList />
+      <EventList role="referrer" />
     </div>
   );
 }
