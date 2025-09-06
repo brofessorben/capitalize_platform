@@ -1,10 +1,14 @@
-// app/(dash)/chat/[event_id]/page.jsx
 "use client";
+
 import dynamic from "next/dynamic";
 
-const AIChatPage = dynamic(() => import("@/app/components/aichatpage"), { ssr: false });
+const AIChatPage = dynamic(() => import("../../../components/aichatpage"), { ssr: false });
 
-export default function EventChatPage({ params }) {
-  const { event_id } = params;
-  return <AIChatPage header="Event Thread" eventId={event_id} />;
+export default function LeadChatPage({ params }) {
+  const { lead_id } = params || {};
+  return (
+    <div className="max-w-6xl mx-auto px-4 pb-20">
+      <AIChatPage role="referrer" header={`Chat • ${lead_id || "Lead"}`} />
+    </div>
+  );
 }
