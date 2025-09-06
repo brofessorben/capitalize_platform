@@ -1,3 +1,4 @@
+// lib/chatStore.ts
 import { getServerSupabase } from "./supabaseClient";
 
 /** List recent events for a role (referrer | vendor | host) */
