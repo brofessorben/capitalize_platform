@@ -1,15 +1,20 @@
+// app/(dash)/referrer/page.jsx
 "use client";
+import dynamic from "next/dynamic";
+import EventList from "@/app/components/eventlist";
 
-import { useState } from "react";
-import AIChatPage from "../../components/aichatpage";
-import EventList from "../../components/eventlist";
+const AIChatPage = dynamic(() => import("@/app/components/aichatpage"), { ssr: false });
 
 export default function ReferrerDash() {
-  const [eventId, setEventId] = useState(null);
   return (
-    <div className="max-w-6xl mx-auto p-4 md:p-6">
-      <AIChatPage role="referrer" header="Referrer Console" eventId={eventId} />
-      <EventList role="referrer" activeId={eventId} onSelect={setEventId} />
+    <div className="grid lg:grid-cols-3 gap-6">
+      <div className="lg:col-span-2">
+        <AIChatPage role="referrer" header="Referrer Console" />
+      </div>
+      <div>
+        <h3 className="text-zinc-100 font-semibold mb-3">Your Events</h3>
+        <EventList roleFilter="referrer" />
+      </div>
     </div>
   );
 }
