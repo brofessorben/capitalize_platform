@@ -1,53 +1,47 @@
-// app/components/eventlist.jsx
 "use client";
-import React, { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
-import { useRouter } from "next/navigation";
 
-export default function EventList({ roleFilter }) {
+import React, { useEffect, useState } from "react";
+import { getSupabase } from "@/lib/supabaseClient";
+
+export default function EventList({ role }) {
   const [events, setEvents] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const router = useRouter();
 
   useEffect(() => {
-    let sub;
-    const load = async () => {
-      setLoading(true);
+    const supabase = getSupabase();
+
+    const loadEvents = async () => {
       const { data, error } = await supabase
         .from("events")
         .select("*")
         .order("created_at", { ascending: false });
-      if (!error) setEvents((data || []).filter((e) => !roleFilter || e.role === roleFilter));
-      setLoading(false);
+
+      if (error) {
+        console.error("Error fetching events:", error);
+      } else {
+        setEvents(data || []);
+      }
     };
-    load();
 
-    // realtime on events table
-    sub = supabase
-      .channel("events-rt")
-      .on("postgres_changes", { event: "*", schema: "public", table: "events" }, load)
-      .subscribe();
-
-    return () => {
-      if (sub) supabase.removeChannel(sub);
-    };
-  }, [roleFilter]);
-
-  if (loading) return <div className="text-zinc-400 text-sm">Loading events…</div>;
-  if (!events.length) return <div className="text-zinc-400 text-sm">No events yet.</div>;
+    loadEvents();
+  }, []);
 
   return (
-    <div className="space-y-2">
-      {events.map((e) => (
-        <button
-          key={e.id}
-          onClick={() => router.push(`/chat/${e.id}`)}
-          className="w-full text-left rounded-xl bg-zinc-900/70 border border-zinc-800 px-4 py-3 hover:bg-zinc-900"
-        >
-          <div className="text-zinc-100 font-medium">{e.title}</div>
-          <div className="text-xs text-zinc-400">{e.role} • {new Date(e.created_at).toLocaleString()}</div>
-        </button>
-      ))}
+    <div className="p-4 bg-[#111] text-white border-t border-gray-700">
+      <h3 className="font-semibold mb-2">Your {role} Events</h3>
+      {events.length === 0 ? (
+        <p className="text-gray-400 text-sm">No events yet.</p>
+      ) : (
+        <ul className="space-y-2">
+          {events.map((evt) => (
+            <li
+              key={evt.id}
+              className="bg-gray-800 p-3 rounded hover:bg-gray-700 cursor-pointer"
+            >
+              <strong>{evt.title}</strong> — {evt.status}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
