@@ -7,6 +7,7 @@ import { listEvents, createEvent, listMessages, addMessage } from "@/lib/chatSto
 import ChatBubble from "./ChatBubble";
 import LeadQuickCapture from "./LeadQuickCapture";
 import SuggestedPrompts from "./suggestedprompts";
+import EventList from "./eventlist"; // <-- MISSING BEFORE
 
 export default function AIChatPage({ role, header }) {
   const [events, setEvents] = useState([]);
@@ -18,9 +19,13 @@ export default function AIChatPage({ role, header }) {
   // load events for this role
   useEffect(() => {
     (async () => {
-      const list = await listEvents(role);
-      setEvents(list);
-      if (list.length && !eventId) setEventId(list[0].id);
+      try {
+        const list = await listEvents(role);
+        setEvents(list);
+        if (list.length && !eventId) setEventId(list[0].id);
+      } catch (e) {
+        console.error("listEvents failed", e);
+      }
     })();
   }, [role]);
 
@@ -30,11 +35,17 @@ export default function AIChatPage({ role, header }) {
 
     let abort = false;
     (async () => {
-      const data = await listMessages(eventId);
-      if (!abort) setMessages(data);
+      try {
+        const data = await listMessages(eventId);
+        if (!abort) setMessages(data);
+      } catch (e) {
+        console.error("listMessages failed", e);
+      }
     })();
 
-    const supabase = getSupabase();
+    const supabase = getSupabase?.();
+    if (!supabase) return () => {};
+
     const channel = supabase
       .channel(`msg-${eventId}`)
       .on(
@@ -55,19 +66,27 @@ export default function AIChatPage({ role, header }) {
   }, [messages]);
 
   async function handleSend(text) {
-    if (!text?.trim()) return;
-    if (!eventId) return; // must have a thread selected
-    await addMessage(eventId, role, text.trim());
-    setInput("");
+    const t = text?.trim();
+    if (!t || !eventId) return;
+    try {
+      await addMessage(eventId, role, t);
+      setInput("");
+    } catch (e) {
+      console.error("addMessage failed", e);
+    }
   }
 
   async function handleNewThread() {
-    const title = prompt("Name this thread:");
+    const title = typeof window !== "undefined" ? prompt("Name this thread:") : null;
     if (!title) return;
-    const ev = await createEvent(title, role);
-    setEvents((prev) => [ev, ...prev]);
-    setEventId(ev.id);
-    setMessages([]);
+    try {
+      const ev = await createEvent(title, role);
+      setEvents((prev) => [ev, ...prev]);
+      setEventId(ev.id);
+      setMessages([]);
+    } catch (e) {
+      console.error("createEvent failed", e);
+    }
   }
 
   function handlePickSuggestion(t) {
@@ -78,22 +97,20 @@ export default function AIChatPage({ role, header }) {
     <div className="flex flex-col min-h-[70vh] bg-[#0b0f0d] text-[#e9fff2]">
       <div className="px-4 py-4 border-b border-[#24322a] flex items-center justify-between">
         <h2 className="text-xl font-bold">{header}</h2>
-        <div className="flex gap-2">
-          <button
-            onClick={handleNewThread}
-            className="rounded-md px-3 py-1.5 text-sm border border-[#2b4b3a] bg-[#0f1a14] text-[#baf7ca] hover:bg-[#143021] transition"
-          >
-            + New Thread
-          </button>
-        </div>
+        <button
+          onClick={handleNewThread}
+          className="rounded-md px-3 py-1.5 text-sm border border-[#2b4b3a] bg-[#0f1a14] text-[#baf7ca] hover:bg-[#143021] transition"
+        >
+          + New Thread
+        </button>
       </div>
 
-      {/* Suggestions below header */}
+      {/* Suggestions */}
       <div className="px-4 pt-3">
         <SuggestedPrompts role={role} onPick={handlePickSuggestion} />
       </div>
 
-      {/* Chat area */}
+      {/* Chat */}
       <div className="flex-1 overflow-y-auto px-4 pb-4 pt-2 space-y-3">
         {!eventId && (
           <div className="rounded-lg border border-[#2b4b3a] bg-[#0f1a14] p-4 text-[#baf7ca]">
@@ -134,7 +151,7 @@ export default function AIChatPage({ role, header }) {
         </div>
       )}
 
-      {/* Bottom dashboard: your threads */}
+      {/* Bottom dashboard: threads */}
       <div className="px-4 pb-10">
         <EventList
           items={events}
