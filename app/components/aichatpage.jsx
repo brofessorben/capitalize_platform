@@ -1,160 +1,101 @@
-// app/components/aichatpage.jsx
 "use client";
-import React, { useEffect, useRef, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
-import ChatBubble from "./ChatBubble";           // your existing .tsx component
-import LeadQuickCapture from "./LeadQuickCapture"; // keep if you want the form
 
-function stripPolite(text) {
-  return String(text || "")
-    .replace(/^\s*(hey|hi|hello|please|can you|could you|would you)\b[:,\s]*/i, "")
-    .trim();
-}
+import React, { useState, useEffect, useRef } from "react";
+import { getSupabase } from "@/lib/supabaseClient";
+import ChatBubble from "./ChatBubble";
+import LeadQuickCapture from "./LeadQuickCapture";
 
-export default function AIChatPage({ role = "referrer", header = "Console", eventId }) {
+export default function AIChatPage({ role, header }) {
   const [messages, setMessages] = useState([]);
-  const [draft, setDraft] = useState("");
-  const [activeEventId, setActiveEventId] = useState(eventId || null);
-  const [loading, setLoading] = useState(false);
-  const listRef = useRef(null);
+  const [input, setInput] = useState("");
+  const messagesEndRef = useRef(null);
 
-  // auto-create a thread if none was passed (so dashboard can chat instantly)
+  // Load existing messages from Supabase
   useEffect(() => {
-    const ensureEvent = async () => {
-      if (activeEventId) return;
-      const { data, error } = await supabase
-        .from("events")
-        .insert([{ title: `Quick Chat — ${new Date().toLocaleString()}`, role, status: "open" }])
-        .select("id")
-        .single();
-      if (!error && data?.id) setActiveEventId(data.id);
-    };
-    ensureEvent();
-  }, [activeEventId, role]);
+    const supabase = getSupabase();
 
-  // load + subscribe to messages for the active event
-  useEffect(() => {
-    if (!activeEventId) return;
-
-    let sub;
-    const load = async () => {
+    const loadMessages = async () => {
       const { data, error } = await supabase
         .from("messages")
         .select("*")
-        .eq("event_id", activeEventId)
         .order("created_at", { ascending: true });
-      if (!error) setMessages(data || []);
-      // scroll to bottom
-      setTimeout(() => listRef.current?.scrollTo({ top: 1e9, behavior: "smooth" }), 50);
-    };
-    load();
 
-    sub = supabase
-      .channel(`msg-${activeEventId}`)
+      if (error) {
+        console.error("Error fetching messages:", error);
+      } else {
+        setMessages(data || []);
+      }
+    };
+
+    loadMessages();
+
+    // Subscribe to real-time updates
+    const channel = supabase
+      .channel("realtime-messages")
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "messages", filter: `event_id=eq.${activeEventId}` },
-        load
+        { event: "INSERT", schema: "public", table: "messages" },
+        (payload) => {
+          setMessages((prev) => [...prev, payload.new]);
+        }
       )
       .subscribe();
 
     return () => {
-      if (sub) supabase.removeChannel(sub);
+      supabase.removeChannel(channel);
     };
-  }, [activeEventId]);
+  }, []);
 
-  async function sendMessage() {
-    const text = stripPolite(draft);
-    if (!text) return;
+  // Auto-scroll on new messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
-    setDraft("");
-    setLoading(true);
+  const handleSend = async () => {
+    if (!input.trim()) return;
 
-    // Optimistic add of user msg
-    const localUser = {
-      id: crypto.randomUUID(),
-      event_id: activeEventId,
-      role,
-      content: text,
-      created_at: new Date().toISOString(),
-    };
-    setMessages((m) => [...m, localUser]);
-
-    // Call API -> will store both the user + assistant messages
-    const r = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        messages: messages.concat(localUser).map(({ role, content }) => ({ role, content })),
+    const supabase = getSupabase();
+    const { error } = await supabase.from("messages").insert([
+      {
         role,
-        eventId: activeEventId,
-      }),
-    });
-    const j = await r.json();
-    // On success, realtime will pull assistant reply; nothing else to do.
-    setLoading(false);
-  }
+        content: input.trim(),
+      },
+    ]);
+
+    if (error) {
+      console.error("Error sending message:", error);
+    }
+
+    setInput("");
+  };
 
   return (
-    <div className="max-w-3xl mx-auto">
-      <h2 className="text-xl font-semibold text-zinc-100 mb-4">{header}</h2>
+    <div className="flex flex-col h-full bg-[#0f0f0f] text-white">
+      <h2 className="p-4 text-xl font-bold border-b border-gray-700">{header}</h2>
 
-      <div className="rounded-2xl bg-zinc-900/70 border border-zinc-800 p-4 mb-3 text-zinc-200">
-        {role === "referrer" && (
-          <div>
-            Yo! I’m your CAPITALIZE co-pilot. Drop vendor + host details (names, contacts, event info) and I’ll draft the intro for you.
-          </div>
-        )}
-        {role === "vendor" && (
-          <div>
-            Welcome to your vendor console. Paste the lead details (event, date, headcount, budget, location, notes) and I’ll draft a sharp reply or proposal.
-          </div>
-        )}
-        {role === "host" && (
-          <div>
-            Welcome! Tell me what you’re planning (event, date, headcount, budget, location, vibe). I’ll generate a clean vendor request.
-          </div>
-        )}
-        <div className="text-xs text-emerald-400 mt-2">Tip: use <code>/search</code>, <code>/news</code>, <code>/maps</code></div>
-      </div>
-
-      {/* messages */}
-      <div
-        ref={listRef}
-        className="rounded-2xl bg-zinc-950/50 border border-zinc-800 p-3 h-[50vh] overflow-y-auto space-y-2"
-      >
-        {messages.map((m) => (
-          <ChatBubble key={m.id} role={m.role} content={m.content} />
+      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        {messages.map((msg) => (
+          <ChatBubble key={msg.id} role={msg.role} content={msg.content} />
         ))}
-        {!messages.length && (
-          <div className="text-sm text-zinc-400">No messages yet. Say hi 👋</div>
-        )}
+        <div ref={messagesEndRef} />
       </div>
 
-      {/* input */}
-      <div className="flex gap-2 mt-3">
+      <div className="p-3 border-t border-gray-700 flex gap-2">
         <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") sendMessage();
-          }}
-          placeholder="Type it. I’ll make it shine. (Cmd/Ctrl+Enter to send)"
-          className="flex-1 rounded-xl bg-zinc-900/70 border border-zinc-800 px-4 py-3 text-zinc-100 placeholder-zinc-500 focus:outline-none"
+          className="flex-1 p-2 bg-gray-800 rounded text-white"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="Type it. I’ll make it shine..."
         />
         <button
-          onClick={sendMessage}
-          disabled={!draft || loading}
-          className="px-4 py-3 rounded-xl bg-emerald-600 text-white font-medium disabled:opacity-50"
+          className="bg-green-600 px-4 py-2 rounded text-white font-semibold"
+          onClick={handleSend}
         >
-          {loading ? "…" : "Send"}
+          Send
         </button>
       </div>
 
-      {/* Optional capture block */}
-      <div className="mt-6">
-        <LeadQuickCapture />
-      </div>
+      {role === "referrer" && <LeadQuickCapture />}
     </div>
   );
 }
