@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getSupabase } from "@/lib/supabaseClient";
 import ChatBubble from "./ChatBubble";
 import LeadQuickCapture from "./LeadQuickCapture";
-import SuggestedPrompts from "./suggestedpromts";
+import SuggestedPrompts from "./suggestedprompts";
 import EventList from "./eventlist"; // the bottom thread list
 
 export default function AIChatPage({ role, header }) {
