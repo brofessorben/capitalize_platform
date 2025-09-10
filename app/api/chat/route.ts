@@ -2,9 +2,9 @@
 import { NextResponse } from "next/server";
 import { getServerSupabase } from "@/lib/supabaseClient";
 
-const BULLET = "•"; // if needed, use "\u2022"
+const BULLET = "•";
 
-// small helper: quick "live" search via SerpAPI
+// quick “live” web search via SerpAPI (optional)
 async function vendorSearch(q: string) {
   try {
     const key = process.env.SERPAPI_KEY;
@@ -30,7 +30,7 @@ async function vendorSearch(q: string) {
 
     if (!items?.length) return null;
 
-    // plain text, real bullets (no markdown)
+    // Plain text with real bullets
     const lines = items
       .map(
         (it) =>
@@ -55,15 +55,22 @@ export async function POST(req: Request) {
 
     const supabase = getServerSupabase();
 
-    // try a quick live search if it sounds like a discovery task
+    // try “live” lookup if it sounds like discovery
     let liveNote: string | null = null;
     if (/find|vendors?|menus?|bbq|food truck|cater|availability|quote/i.test(content)) {
       liveNote = await vendorSearch(content);
     }
 
-    // STYLE RULES: plain text only, real bullets, short headings, tasteful emojis, end with 1 next step
+    /**
+     * STYLE RULES (AI):
+     * - Output MUST be plain text (no markdown markers, no **).
+     * - Use real bullets with "• " (one per line).
+     * - Use short section titles like "Plan:", "Vendors:", "Next step:" (title on its own line).
+     * - Prefer concise lists over paragraphs. Emojis only when they add clarity or momentum.
+     * - Always end with one crisp "Next step:" line tailored to the user.
+     */
     const system =
-      "You are CAPITALIZE, an event ops co-pilot for referrers, vendors, and hosts. STYLE RULES: Output MUST be plain text (no Markdown markers or **). Use real bullets with the '• ' character (one per line). Prefer concise sections with short titles ending in a colon. Use tasteful emojis only when they add clarity or momentum, not every line. Be friendly, confident, and practical. Always end with one crisp Next step: line tailored to the user.";
+      "You are CAPITALIZE, an event ops co-pilot for referrers, vendors, and hosts. Output MUST be plain text (no markdown markers, no **). Use real bullets with '• '. Use short section titles with a trailing colon, each on its own line (e.g., 'Plan:' then bullets). Prefer concise lists. Use tasteful emojis sparingly. Always end with exactly one 'Next step:' line.";
 
     // build short conversation context (last 30 messages)
     const { data: history } = await supabase
@@ -79,10 +86,7 @@ export async function POST(req: Request) {
         role: m.role === "assistant" ? "assistant" : "user",
         content: m.content,
       })),
-      {
-        role: "user",
-        content: content + (liveNote ? `\n\n${liveNote}` : ""),
-      },
+      { role: "user", content: content + (liveNote ? `\n\n${liveNote}` : "") },
     ];
 
     // OpenAI call
@@ -109,9 +113,9 @@ export async function POST(req: Request) {
     const reply: string = j.choices?.[0]?.message?.content?.trim() || "Done.";
 
     // store assistant reply
-    await supabase
-      .from("messages")
-      .insert([{ event_id, role: "assistant", content: reply }]);
+    await supabase.from("messages").insert([
+      { event_id, role: "assistant", content: reply },
+    ]);
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {
