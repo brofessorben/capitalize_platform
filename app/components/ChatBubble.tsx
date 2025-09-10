@@ -7,20 +7,25 @@ type Props = {
   content: string;
 };
 
-/** Remove markdown asterisks; normalize list markers to real bullets */
+/** Strip markdown, normalize hyphen/asterisk bullets to real bullets */
 function normalize(text: string) {
-  return text.replace(/\*\*/g, "").replace(/^\s*[-*]\s+/gm, "• ");
+  return text
+    .replace(/\*\*/g, "")                // kill markdown bold markers
+    .replace(/^\s*[-*]\s+/gm, "• ");     // convert - / * bullets to "• "
 }
 
-/** Render text as blocks: headings, bullet lists, or paragraphs */
+/** Render text into headings, lists (only if 3+ items), or paragraphs */
 function renderBlocks(text: string) {
   const blocks = normalize(text).split(/\n{2,}/); // split on blank lines
 
   return blocks.map((block, idx) => {
     const lines = block.split("\n").filter(Boolean);
 
-    // If every line is a bullet (• ), render a UL
-    if (lines.length && lines.every((l) => /^•\s/.test(l))) {
+    const isBullet = (l: string) => /^•\s/.test(l);
+    const bulletCount = lines.filter(isBullet).length;
+
+    // Only render as UL if 3+ bullets; otherwise show as sentences
+    if (bulletCount >= 3 && bulletCount === lines.length) {
       return (
         <ul key={idx} className="list-disc pl-5 space-y-1">
           {lines.map((l, i) => (
@@ -30,12 +35,12 @@ function renderBlocks(text: string) {
       );
     }
 
-    // If it looks like a section heading (short line ending with colon)
+    // Section heading: short single line ending with colon
     if (
       lines.length === 1 &&
       /:$/m.test(lines[0]) &&
       lines[0].length <= 60 &&
-      !/^•\s/.test(lines[0])
+      !isBullet(lines[0])
     ) {
       return (
         <h4
@@ -47,7 +52,30 @@ function renderBlocks(text: string) {
       );
     }
 
-    // Otherwise render as a paragraph, preserving single newlines
+    // Special styling for the final "Next step:" line if it comes alone
+    if (
+      lines.length === 1 &&
+      /^Next step:/i.test(lines[0]) &&
+      !isBullet(lines[0])
+    ) {
+      return (
+        <p key={idx} className="whitespace-pre-wrap leading-relaxed font-medium">
+          {lines[0]}
+        </p>
+      );
+    }
+
+    // If there are 1–2 bullet lines, show as normal sentences (no list UI)
+    if (bulletCount > 0 && bulletCount < 3) {
+      const cleaned = lines.map((l) => l.replace(/^•\s?/, "— ")).join("\n");
+      return (
+        <p key={idx} className="whitespace-pre-wrap leading-relaxed">
+          {cleaned}
+        </p>
+      );
+    }
+
+    // Default paragraph, preserve newlines
     return (
       <p key={idx} className="whitespace-pre-wrap leading-relaxed">
         {block}
