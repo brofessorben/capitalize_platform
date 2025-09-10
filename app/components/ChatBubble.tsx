@@ -7,11 +7,53 @@ type Props = {
   content: string;
 };
 
+/** Remove markdown asterisks; normalize list markers to real bullets */
 function normalize(text: string) {
-  // kill markdown ** and turn -/* bullets into real bullets
-  return text
-    .replace(/\*\*/g, "")
-    .replace(/^\s*[-*]\s+/gm, "• ");
+  return text.replace(/\*\*/g, "").replace(/^\s*[-*]\s+/gm, "• ");
+}
+
+/** Render text as blocks: headings, bullet lists, or paragraphs */
+function renderBlocks(text: string) {
+  const blocks = normalize(text).split(/\n{2,}/); // split on blank lines
+
+  return blocks.map((block, idx) => {
+    const lines = block.split("\n").filter(Boolean);
+
+    // If every line is a bullet (• ), render a UL
+    if (lines.length && lines.every((l) => /^•\s/.test(l))) {
+      return (
+        <ul key={idx} className="list-disc pl-5 space-y-1">
+          {lines.map((l, i) => (
+            <li key={i}>{l.replace(/^•\s?/, "")}</li>
+          ))}
+        </ul>
+      );
+    }
+
+    // If it looks like a section heading (short line ending with colon)
+    if (
+      lines.length === 1 &&
+      /:$/m.test(lines[0]) &&
+      lines[0].length <= 60 &&
+      !/^•\s/.test(lines[0])
+    ) {
+      return (
+        <h4
+          key={idx}
+          className="text-[15px] font-semibold tracking-wide mb-1 text-[#e9ffe7]"
+        >
+          {lines[0]}
+        </h4>
+      );
+    }
+
+    // Otherwise render as a paragraph, preserving single newlines
+    return (
+      <p key={idx} className="whitespace-pre-wrap leading-relaxed">
+        {block}
+      </p>
+    );
+  });
 }
 
 export default function ChatBubble({ role, content }: Props) {
@@ -32,10 +74,14 @@ export default function ChatBubble({ role, content }: Props) {
   return (
     <div className="w-full">
       <div className={chip}>{role}</div>
-      <div className={bubble} style={{ fontFamily: "system-ui, ui-rounded, Inter, Segoe UI, Roboto, Helvetica, Arial, sans-serif" }}>
-        <div className="whitespace-pre-wrap leading-relaxed text-[15px]">
-          {normalize(content)}
-        </div>
+      <div
+        className={bubble}
+        style={{
+          fontFamily:
+            "system-ui, ui-rounded, Inter, Segoe UI, Roboto, Helvetica, Arial, sans-serif",
+        }}
+      >
+        <div className="space-y-2 text-[15px]">{renderBlocks(content)}</div>
       </div>
     </div>
   );
