@@ -1,7 +1,10 @@
+// app/api/chat/route.ts
 import { NextResponse } from "next/server";
 import { getServerSupabase } from "@/lib/supabaseClient";
 
-// very small helper “live” search
+const BULLET = "•"; // if needed, use "\u2022"
+
+// small helper: quick "live" search via SerpAPI
 async function vendorSearch(q: string) {
   try {
     const key = process.env.SERPAPI_KEY;
@@ -14,24 +17,28 @@ async function vendorSearch(q: string) {
     url.searchParams.set("api_key", key);
 
     const r = await fetch(url.toString(), { cache: "no-store" });
+    if (!r.ok) return null;
     const j = await r.json();
-    const items: Array<{ title: string; link: string; snippet?: string }> =
-      j?.organic_results?.slice(0, 5)?.map((o: any) => ({
-        title: o.title,
-        link: o.link,
-        snippet: o.snippet,
-      })) ?? [];
 
-    if (!items.length) return null;
+    const items:
+      | Array<{ title: string; link: string; snippet?: string }>
+      | undefined = j?.organic_results?.slice(0, 5)?.map((o: any) => ({
+      title: o.title,
+      link: o.link,
+      snippet: o.snippet,
+    }));
 
+    if (!items?.length) return null;
+
+    // plain text, real bullets (no markdown)
     const lines = items
       .map(
-        (it, i) =>
-          `${i + 1}. ${it.title}\n   ${it.link}${it.snippet ? `\n   ${it.snippet}` : ""}`
+        (it) =>
+          `${BULLET} ${it.title}\n  ${it.link}${it.snippet ? `\n  ${it.snippet}` : ""}`
       )
       .join("\n\n");
 
-    return `BBQ intel drop 🔥 — Web results for: ${q}\n\n${lines}`;
+    return `Web results:\n${lines}`;
   } catch {
     return null;
   }
@@ -48,16 +55,17 @@ export async function POST(req: Request) {
 
     const supabase = getServerSupabase();
 
-    // optional: if user asks to "find", try quick live search first
+    // try a quick live search if it sounds like a discovery task
     let liveNote: string | null = null;
-    if (/find|vendors?|menus?|bbq|food truck|cater/i.test(content)) {
+    if (/find|vendors?|menus?|bbq|food truck|cater|availability|quote/i.test(content)) {
       liveNote = await vendorSearch(content);
     }
 
+    // STYLE RULES: plain text only, real bullets, short headings, tasteful emojis, end with 1 next step
     const system =
-      "You are CAPITALIZE, an event ops co-pilot. Write concise, useful, deal-closing replies with a friendly, confident tone. If given web snippets, synthesize them. Bullets > paragraphs. End with one crisp next step.";
+      "You are CAPITALIZE, an event ops co-pilot for referrers, vendors, and hosts. STYLE RULES: Output MUST be plain text (no Markdown markers or **). Use real bullets with the '• ' character (one per line). Prefer concise sections with short titles ending in a colon. Use tasteful emojis only when they add clarity or momentum, not every line. Be friendly, confident, and practical. Always end with one crisp Next step: line tailored to the user.";
 
-    // build simple conversation context from last 30 messages
+    // build short conversation context (last 30 messages)
     const { data: history } = await supabase
       .from("messages")
       .select("role, content")
@@ -71,10 +79,13 @@ export async function POST(req: Request) {
         role: m.role === "assistant" ? "assistant" : "user",
         content: m.content,
       })),
-      { role: "user", content: content + (liveNote ? `\n\n${liveNote}` : "") },
+      {
+        role: "user",
+        content: content + (liveNote ? `\n\n${liveNote}` : ""),
+      },
     ];
 
-    // call OpenAI (Responses API compatible with gpt-4o-mini)
+    // OpenAI call
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -84,7 +95,7 @@ export async function POST(req: Request) {
       body: JSON.stringify({
         model: "gpt-4o-mini",
         messages,
-        temperature: 0.3,
+        temperature: 0.35,
       }),
     });
 
@@ -95,7 +106,7 @@ export async function POST(req: Request) {
     }
 
     const j = await r.json();
-    const reply: string = j.choices?.[0]?.message?.content ?? "Done.";
+    const reply: string = j.choices?.[0]?.message?.content?.trim() || "Done.";
 
     // store assistant reply
     await supabase
@@ -105,6 +116,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     console.error(e);
-    return NextResponse.json({ ok: false, error: e?.message || "fail" }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: e?.message || "fail" },
+      { status: 500 }
+    );
   }
 }
