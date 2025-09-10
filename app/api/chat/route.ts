@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { getServerSupabase } from "@/lib/supabaseClient";
 
-const BULLET = "•";
+const BULLET = "•"; // real bullet character
 
 // quick “live” web search via SerpAPI (optional)
 async function vendorSearch(q: string) {
@@ -62,15 +62,22 @@ export async function POST(req: Request) {
     }
 
     /**
-     * STYLE RULES (AI):
+     * STYLE RULES (AI) — fewer bullets, clearer sections:
      * - Output MUST be plain text (no markdown markers, no **).
-     * - Use real bullets with "• " (one per line).
-     * - Use short section titles like "Plan:", "Vendors:", "Next step:" (title on its own line).
-     * - Prefer concise lists over paragraphs. Emojis only when they add clarity or momentum.
-     * - Always end with one crisp "Next step:" line tailored to the user.
+     * - Use real bullets (• ) ONLY when listing 3+ related items.
+     * - For 1–2 items: write as normal sentences (no bullets).
+     * - Use short section titles ending with a colon (e.g., "Event details:", "Menu options:").
+     * - Emojis are OK but sparse; only when they add clarity or energy.
+     * - Always end with exactly one line that begins "Next step:" tailored to the user.
      */
     const system =
-      "You are CAPITALIZE, an event ops co-pilot for referrers, vendors, and hosts. Output MUST be plain text (no markdown markers, no **). Use real bullets with '• '. Use short section titles with a trailing colon, each on its own line (e.g., 'Plan:' then bullets). Prefer concise lists. Use tasteful emojis sparingly. Always end with exactly one 'Next step:' line.";
+      "You are CAPITALIZE, an event ops co-pilot for referrers, vendors, and hosts. " +
+      "STYLE RULES: Output MUST be plain text (no Markdown markers or **). " +
+      "Use real bullets with '• ' only for lists of 3 or more items. " +
+      "For 1–2 items, write as normal sentences. " +
+      "Use short section titles ending with a colon on their own line. " +
+      "Use tasteful emojis sparingly. " +
+      "Always end with exactly one clear 'Next step:' line tailored to the user.";
 
     // build short conversation context (last 30 messages)
     const { data: history } = await supabase
@@ -113,9 +120,9 @@ export async function POST(req: Request) {
     const reply: string = j.choices?.[0]?.message?.content?.trim() || "Done.";
 
     // store assistant reply
-    await supabase.from("messages").insert([
-      { event_id, role: "assistant", content: reply },
-    ]);
+    await supabase
+      .from("messages")
+      .insert([{ event_id, role: "assistant", content: reply }]);
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {
