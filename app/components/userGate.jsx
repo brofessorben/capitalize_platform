@@ -3,21 +3,15 @@
 import React, { useEffect, useState } from "react";
 import { getSupabase } from "@/lib/supabaseClient";
 
-type Props = {
-  children: React.ReactNode;
-  /** Optional: show this header on the login screen */
-  title?: string;
-};
-
 /**
  * UserGate
  * - If signed in: renders children
  * - If signed out: shows a simple Google sign-in screen
  */
-export default function UserGate({ children, title = "Sign in to continue" }: Props) {
+export default function UserGate({ children, title = "Sign in to continue" }) {
   const supabase = getSupabase();
   const [loading, setLoading] = useState(true);
-  const [session, setSession] = useState<null | { user: { email?: string; id: string } }>(null);
+  const [session, setSession] = useState(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -25,13 +19,13 @@ export default function UserGate({ children, title = "Sign in to continue" }: Pr
     // get current session
     supabase.auth.getSession().then(({ data }) => {
       if (!isMounted) return;
-      setSession(data.session as any);
+      setSession(data.session);
       setLoading(false);
     });
 
     // listen for auth changes
     const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
-      setSession(sess as any);
+      setSession(sess);
       setLoading(false);
     });
 
@@ -52,7 +46,6 @@ export default function UserGate({ children, title = "Sign in to continue" }: Pr
             : undefined,
       },
     });
-    // Supabase will redirect; no need to manually unset loading.
   }
 
   async function signOut() {
@@ -93,7 +86,7 @@ export default function UserGate({ children, title = "Sign in to continue" }: Pr
     <div className="min-h-[60vh]">
       <div className="flex items-center justify-end gap-3 px-4 py-2 text-xs text-neutral-300">
         <span className="truncate max-w-[40ch]">
-          {session.user.email || session.user.id}
+          {session.user?.email || session.user?.id}
         </span>
         <button
           onClick={signOut}
