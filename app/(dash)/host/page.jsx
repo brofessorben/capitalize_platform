@@ -1,7 +1,24 @@
 "use client";
-import dynamic from "next/dynamic";
-const AIChatPage = dynamic(() => import("../../components/aichatpage"), { ssr: false });
 
-export default function HostDash() {
-  return <AIChatPage role="host" header="Host Console" />;
+import React, { useEffect } from "react";
+import UserGate from "../../components/userGate";
+import AIChatPage from "../../components/aichatpage";
+import EventList from "../../components/eventlist";
+import { ensureProfile } from "@/lib/ensureProfile";
+
+export default function HostPage() {
+  useEffect(() => {
+    ensureProfile();
+  }, []);
+
+  return (
+    <UserGate>
+      <div className="mx-auto max-w-6xl p-4 md:p-6 text-white">
+        <AIChatPage role="host" header="Host Console" />
+        <div className="mt-8">
+          <EventList role="host" />
+        </div>
+      </div>
+    </UserGate>
+  );
 }
