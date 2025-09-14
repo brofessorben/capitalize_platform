@@ -1,10 +1,11 @@
 // app/api/chat/route.ts
 import { NextResponse } from "next/server";
-import { getServerSupabase } from "@/lib/supabaseClient";
+import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
 
 const BULLET = "•";
 
-// quick “live” web search via SerpAPI (optional)
+// Optional: quick “live” web search via SerpAPI
 async function vendorSearch(q: string) {
   try {
     const key = process.env.SERPAPI_KEY;
@@ -33,9 +34,7 @@ async function vendorSearch(q: string) {
     const lines = items
       .map(
         (it) =>
-          `${BULLET} ${it.title}\n  ${it.link}${
-            it.snippet ? `\n  ${it.snippet}` : ""
-          }`
+          `${BULLET} ${it.title}\n  ${it.link}${it.snippet ? `\n  ${it.snippet}` : ""}`
       )
       .join("\n\n");
 
@@ -47,67 +46,79 @@ async function vendorSearch(q: string) {
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    // IMPORTANT: we’re standardizing on lead_id (your DB uses lead_id)
-    const { lead_id, role, content } = body as {
-      lead_id: string;
-      role: string;
-      content: string;
-    };
+    // Build a Supabase *server* client bound to the user's auth cookies
+    const cookieStore = cookies();
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) {
+            return cookieStore.get(name)?.value;
+          },
+          set() {
+            // next/headers cookies are read-only during route handlers
+          },
+          remove() {
+            // read-only
+          },
+        },
+      }
+    );
 
-    const supabase = getServerSupabase();
-
-    // get current user from auth cookie
+    // Get the logged-in user (required for per-user threads + RLS)
     const {
       data: { user },
       error: userErr,
     } = await supabase.auth.getUser();
+
     if (userErr || !user) {
       return NextResponse.json(
         { ok: false, error: "Not signed in" },
         { status: 401 }
       );
     }
-    const userId = user.id;
 
-    // try “live” lookup if it sounds like discovery
+    // Read request
+    const body = await req.json();
+    const { event_id, role, content } = body as {
+      event_id: string;
+      role: string;
+      content: string;
+    };
+
+    // Optional “live” lookup
     let liveNote: string | null = null;
-    if (
-      /find|vendors?|menus?|bbq|food truck|cater|availability|quote/i.test(
-        content
-      )
-    ) {
+    if (/find|vendors?|menus?|bbq|food truck|cater|availability|quote/i.test(content)) {
       liveNote = await vendorSearch(content);
     }
 
-    /**
-     * STYLE RULES (AI)
-     */
+    // Style/system prompt (unchanged)
     const system =
       "You are CAPITALIZE, an event ops co-pilot for referrers, vendors, and hosts. Output MUST be plain text (no markdown markers, no **). Use real bullets with '• '. Use short section titles with a trailing colon, each on its own line (e.g., 'Plan:' then bullets). Prefer concise lists. Use tasteful emojis sparingly. Always end with exactly one 'Next step:' line.";
 
-    // build short conversation context (last 30 messages), **scoped to this user + lead**
-    const { data: history } = await supabase
+    // Pull the last ~30 messages for THIS user + THIS event_id
+    const { data: historyRows } = await supabase
       .from("messages")
-      .select("role, content")
-      .eq("lead_id", lead_id)
-      .eq("user_id", userId)
+      .select("sender, role, text, created_at")
+      .eq("event_id", event_id)
+      .eq("user_id", user.id) // << key line: isolate by user
       .order("created_at", { ascending: true })
       .limit(30);
 
+    const history =
+      historyRows?.map((m) => ({
+        role: m.sender === "ai" ? "assistant" : "user",
+        content: m.text,
+      })) ?? [];
+
     const messages = [
       { role: "system", content: system },
-      ...(history || []).map((m) => ({
-        role: m.role === "assistant" ? "assistant" : "user",
-        content: m.content,
-      })),
-      {
-        role: "user",
-        content: content + (liveNote ? `\n\n${liveNote}` : ""),
-      },
+      ...history,
+      { role: "user", content: content + (liveNote ? `\n\n${liveNote}` : "") },
     ];
 
-    // OpenAI call
+    // Call OpenAI
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -128,18 +139,23 @@ export async function POST(req: Request) {
     }
 
     const j = await r.json();
-    const reply: string =
-      j.choices?.[0]?.message?.content?.trim() || "Done.";
+    const reply: string = j.choices?.[0]?.message?.content?.trim() || "Done.";
 
-    // store assistant reply, tied to THIS user
-    await supabase.from("messages").insert([
+    // Insert the assistant's reply WITH user_id so RLS passes
+    const { error: insertErr } = await supabase.from("messages").insert([
       {
-        lead_id,
+        event_id,
+        user_id: user.id, // << important
+        sender: "ai",
         role: "assistant",
-        content: reply,
-        user_id: userId,
+        text: reply,
       },
     ]);
+
+    if (insertErr) {
+      console.error("Insert error", insertErr);
+      throw insertErr;
+    }
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {
