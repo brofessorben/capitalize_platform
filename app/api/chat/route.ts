@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { getServerSupabase } from "@/lib/supabaseClient";
 
-const BULLET = "•"; // real bullet character
+const BULLET = "•";
 
 // quick “live” web search via SerpAPI (optional)
 async function vendorSearch(q: string) {
@@ -30,11 +30,12 @@ async function vendorSearch(q: string) {
 
     if (!items?.length) return null;
 
-    // Plain text with real bullets
     const lines = items
       .map(
         (it) =>
-          `${BULLET} ${it.title}\n  ${it.link}${it.snippet ? `\n  ${it.snippet}` : ""}`
+          `${BULLET} ${it.title}\n  ${it.link}${
+            it.snippet ? `\n  ${it.snippet}` : ""
+          }`
       )
       .join("\n\n");
 
@@ -47,43 +48,50 @@ async function vendorSearch(q: string) {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { event_id, role, content } = body as {
-      event_id: string;
+    // IMPORTANT: we’re standardizing on lead_id (your DB uses lead_id)
+    const { lead_id, role, content } = body as {
+      lead_id: string;
       role: string;
       content: string;
     };
 
     const supabase = getServerSupabase();
 
+    // get current user from auth cookie
+    const {
+      data: { user },
+      error: userErr,
+    } = await supabase.auth.getUser();
+    if (userErr || !user) {
+      return NextResponse.json(
+        { ok: false, error: "Not signed in" },
+        { status: 401 }
+      );
+    }
+    const userId = user.id;
+
     // try “live” lookup if it sounds like discovery
     let liveNote: string | null = null;
-    if (/find|vendors?|menus?|bbq|food truck|cater|availability|quote/i.test(content)) {
+    if (
+      /find|vendors?|menus?|bbq|food truck|cater|availability|quote/i.test(
+        content
+      )
+    ) {
       liveNote = await vendorSearch(content);
     }
 
     /**
-     * STYLE RULES (AI) — fewer bullets, clearer sections:
-     * - Output MUST be plain text (no markdown markers, no **).
-     * - Use real bullets (• ) ONLY when listing 3+ related items.
-     * - For 1–2 items: write as normal sentences (no bullets).
-     * - Use short section titles ending with a colon (e.g., "Event details:", "Menu options:").
-     * - Emojis are OK but sparse; only when they add clarity or energy.
-     * - Always end with exactly one line that begins "Next step:" tailored to the user.
+     * STYLE RULES (AI)
      */
     const system =
-      "You are CAPITALIZE, an event ops co-pilot for referrers, vendors, and hosts. " +
-      "STYLE RULES: Output MUST be plain text (no Markdown markers or **). " +
-      "Use real bullets with '• ' only for lists of 3 or more items. " +
-      "For 1–2 items, write as normal sentences. " +
-      "Use short section titles ending with a colon on their own line. " +
-      "Use tasteful emojis sparingly. " +
-      "Always end with exactly one clear 'Next step:' line tailored to the user.";
+      "You are CAPITALIZE, an event ops co-pilot for referrers, vendors, and hosts. Output MUST be plain text (no markdown markers, no **). Use real bullets with '• '. Use short section titles with a trailing colon, each on its own line (e.g., 'Plan:' then bullets). Prefer concise lists. Use tasteful emojis sparingly. Always end with exactly one 'Next step:' line.";
 
-    // build short conversation context (last 30 messages)
+    // build short conversation context (last 30 messages), **scoped to this user + lead**
     const { data: history } = await supabase
       .from("messages")
       .select("role, content")
-      .eq("event_id", event_id)
+      .eq("lead_id", lead_id)
+      .eq("user_id", userId)
       .order("created_at", { ascending: true })
       .limit(30);
 
@@ -93,7 +101,10 @@ export async function POST(req: Request) {
         role: m.role === "assistant" ? "assistant" : "user",
         content: m.content,
       })),
-      { role: "user", content: content + (liveNote ? `\n\n${liveNote}` : "") },
+      {
+        role: "user",
+        content: content + (liveNote ? `\n\n${liveNote}` : ""),
+      },
     ];
 
     // OpenAI call
@@ -117,12 +128,18 @@ export async function POST(req: Request) {
     }
 
     const j = await r.json();
-    const reply: string = j.choices?.[0]?.message?.content?.trim() || "Done.";
+    const reply: string =
+      j.choices?.[0]?.message?.content?.trim() || "Done.";
 
-    // store assistant reply
-    await supabase
-      .from("messages")
-      .insert([{ event_id, role: "assistant", content: reply }]);
+    // store assistant reply, tied to THIS user
+    await supabase.from("messages").insert([
+      {
+        lead_id,
+        role: "assistant",
+        content: reply,
+        user_id: userId,
+      },
+    ]);
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {
