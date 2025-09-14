@@ -1,11 +1,10 @@
 // app/api/chat/route.ts
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createServerClient } from "@supabase/ssr";
+import { getServerSupabase } from "@/lib/supabaseClient";
 
-const BULLET = "•";
+const BULLET = "•"; // real bullet character
 
-// Optional: quick “live” web search via SerpAPI
+// tiny “live” web search via SerpAPI (optional)
 async function vendorSearch(q: string) {
   try {
     const key = process.env.SERPAPI_KEY;
@@ -31,6 +30,7 @@ async function vendorSearch(q: string) {
 
     if (!items?.length) return null;
 
+    // plain text with real bullets — no markdown
     const lines = items
       .map(
         (it) =>
@@ -46,40 +46,6 @@ async function vendorSearch(q: string) {
 
 export async function POST(req: Request) {
   try {
-    // Build a Supabase *server* client bound to the user's auth cookies
-    const cookieStore = cookies();
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get(name: string) {
-            return cookieStore.get(name)?.value;
-          },
-          set() {
-            // next/headers cookies are read-only during route handlers
-          },
-          remove() {
-            // read-only
-          },
-        },
-      }
-    );
-
-    // Get the logged-in user (required for per-user threads + RLS)
-    const {
-      data: { user },
-      error: userErr,
-    } = await supabase.auth.getUser();
-
-    if (userErr || !user) {
-      return NextResponse.json(
-        { ok: false, error: "Not signed in" },
-        { status: 401 }
-      );
-    }
-
-    // Read request
     const body = await req.json();
     const { event_id, role, content } = body as {
       event_id: string;
@@ -87,38 +53,57 @@ export async function POST(req: Request) {
       content: string;
     };
 
-    // Optional “live” lookup
+    const supabase = getServerSupabase();
+
+    // get the current authed user (needed for per-user history + writes)
+    const {
+      data: { user },
+      error: userErr,
+    } = await supabase.auth.getUser();
+    if (userErr) throw userErr;
+    if (!user?.id) throw new Error("Not authenticated");
+
+    // opportunistic live search if it sounds like discovery
     let liveNote: string | null = null;
     if (/find|vendors?|menus?|bbq|food truck|cater|availability|quote/i.test(content)) {
       liveNote = await vendorSearch(content);
     }
 
-    // Style/system prompt (unchanged)
+    /**
+     * STYLE RULES (AI):
+     * - Output MUST be plain text (no markdown markers, no **).
+     * - Use real bullets with "• " (one per line).
+     * - Short section titles with a trailing colon, on their own line (e.g., "Plan:").
+     * - Prefer concise lists; tasteful emojis only if they add clarity.
+     * - Always end with exactly one "Next step:" line.
+     */
     const system =
-      "You are CAPITALIZE, an event ops co-pilot for referrers, vendors, and hosts. Output MUST be plain text (no markdown markers, no **). Use real bullets with '• '. Use short section titles with a trailing colon, each on its own line (e.g., 'Plan:' then bullets). Prefer concise lists. Use tasteful emojis sparingly. Always end with exactly one 'Next step:' line.";
+      "You are CAPITALIZE, an event ops co-pilot for referrers, vendors, and hosts. Output MUST be plain text (no markdown markers, no **). Use real bullets with '• '. Use short section titles with a trailing colon, each on its own line. Prefer concise lists. Use tasteful emojis sparingly. Always end with exactly one 'Next step:' line.";
 
-    // Pull the last ~30 messages for THIS user + THIS event_id
-    const { data: historyRows } = await supabase
+    // pull last 30 messages for THIS user + THIS event
+    const { data: history, error: histErr } = await supabase
       .from("messages")
-      .select("sender, role, text, created_at")
+      .select("role, content")
       .eq("event_id", event_id)
-      .eq("user_id", user.id) // << key line: isolate by user
+      .eq("user_id", user.id)
       .order("created_at", { ascending: true })
       .limit(30);
 
-    const history =
-      historyRows?.map((m) => ({
-        role: m.sender === "ai" ? "assistant" : "user",
-        content: m.text,
-      })) ?? [];
+    if (histErr) throw histErr;
 
     const messages = [
       { role: "system", content: system },
-      ...history,
-      { role: "user", content: content + (liveNote ? `\n\n${liveNote}` : "") },
+      ...(history || []).map((m) => ({
+        role: m.role === "assistant" ? "assistant" : "user",
+        content: m.content,
+      })),
+      {
+        role: "user",
+        content: content + (liveNote ? `\n\n${liveNote}` : ""),
+      },
     ];
 
-    // Call OpenAI
+    // OpenAI call
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -141,21 +126,16 @@ export async function POST(req: Request) {
     const j = await r.json();
     const reply: string = j.choices?.[0]?.message?.content?.trim() || "Done.";
 
-    // Insert the assistant's reply WITH user_id so RLS passes
+    // store assistant reply with user_id
     const { error: insertErr } = await supabase.from("messages").insert([
       {
         event_id,
-        user_id: user.id, // << important
-        sender: "ai",
         role: "assistant",
-        text: reply,
+        content: reply,
+        user_id: user.id,
       },
     ]);
-
-    if (insertErr) {
-      console.error("Insert error", insertErr);
-      throw insertErr;
-    }
+    if (insertErr) throw insertErr;
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {
