@@ -13,7 +13,7 @@ export function getSupabase() {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
-      detectSessionInUrl: true,
+      detectSessionInUrl: true, // parse tokens on the callback page
       flowType: "pkce",
     },
   });
