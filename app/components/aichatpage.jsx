@@ -3,163 +3,171 @@
 import React, { useEffect, useRef, useState } from "react";
 import { getSupabase } from "@/lib/supabaseClient";
 import ChatBubble from "./ChatBubble";
-import SuggestedPrompts from "./suggestedprompts";
-import LeadQuickCapture from "./LeadQuickCapture";
+import SuggestedPrompts from "./SuggestedPrompts";
 
-export default function AIChatPage({ role = "referrer", header = "Capitalize" }) {
+export default function AIChatPage({
+  role = "referrer",
+  header = "CAPITALIZE • Copilot",
+  initialEventId = null,
+}) {
   const supabase = getSupabase();
+
   const [userId, setUserId] = useState(null);
-  const [eventId, setEventId] = useState<string | null>(null); // your page may set this; fallback below
-  const [messages, setMessages] = useState<any[]>([]);
+  const [eventId, setEventId] = useState(initialEventId); // will create one if missing
+  const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
-  const endRef = useRef<HTMLDivElement | null>(null);
 
-  // Scroll to bottom when messages change
+  const endRef = useRef(null);
+
+  // auto scroll
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Load user + pick a default event if none
+  // boot: get user, ensure we have an event (thread), load + subscribe
   useEffect(() => {
+    let channel;
     (async () => {
-      const { data } = await supabase.auth.getUser();
-      if (!data?.user?.id) {
+      // 1) who’s logged in
+      const { data: sess } = await supabase.auth.getSession();
+      const u = sess?.session?.user;
+      if (!u) {
         setLoading(false);
         return;
       }
-      setUserId(data.user.id);
+      setUserId(u.id);
 
-      // Fallback event_id if your page didn’t set one; you can replace with real thread picker
-      setEventId((prev) => prev || "default");
+      // 2) ensure an event/thread exists
+      let eid = initialEventId;
+      if (!eid) {
+        // get or create a default thread for this user
+        const { data: existing, error: exErr } = await supabase
+          .from("events")
+          .select("id")
+          .eq("owner_user_id", u.id)
+          .order("created_at", { ascending: true })
+          .limit(1);
+        if (exErr) console.error(exErr);
+
+        if (existing && existing.length) {
+          eid = existing[0].id;
+        } else {
+          const { data: created, error: crErr } = await supabase
+            .from("events")
+            .insert([{ owner_user_id: u.id, title: "New thread" }])
+            .select("id")
+            .single();
+          if (crErr) console.error(crErr);
+          eid = created?.id || null;
+        }
+      }
+      setEventId(eid);
+
+      if (!eid) {
+        setLoading(false);
+        return;
+      }
+
+      // 3) load existing messages
+      const { data: initial, error: loadErr } = await supabase
+        .from("messages")
+        .select("*")
+        .eq("event_id", eid)
+        .order("created_at", { ascending: true });
+      if (loadErr) console.error(loadErr);
+      setMessages(initial || []);
+
+      // 4) subscribe to live inserts for this thread
+      channel = supabase
+        .channel(`realtime-messages-${eid}`)
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "messages", filter: `event_id=eq.${eid}` },
+          (payload) => {
+            setMessages((prev) => [...prev, payload.new]);
+          }
+        )
+        .subscribe();
 
       setLoading(false);
     })();
-  }, [supabase]);
-
-  // Load messages for this user + event
-  useEffect(() => {
-    if (!userId || !eventId) return;
-
-    let cancelled = false;
-
-    const load = async () => {
-      const { data, error } = await supabase
-        .from("messages")
-        .select("*")
-        .eq("user_id", userId)
-        .eq("event_id", eventId)
-        .order("created_at", { ascending: true });
-
-      if (!cancelled) {
-        if (error) console.error("fetch messages error", error);
-        setMessages(data || []);
-      }
-    };
-
-    load();
-
-    // realtime inserts for this event & user
-    const channel = supabase
-      .channel(`realtime-messages-${userId}-${eventId}`)
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages", filter: `user_id=eq.${userId}` },
-        (payload) => {
-          if (payload.new.event_id === eventId) {
-            setMessages((prev) => [...prev, payload.new]);
-          }
-        }
-      )
-      .subscribe();
 
     return () => {
-      cancelled = true;
-      supabase.removeChannel(channel);
+      if (channel) supabase.removeChannel(channel);
     };
-  }, [supabase, userId, eventId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supabase, initialEventId]);
 
-  // Handle click on a suggested prompt
-  const handlePickPrompt = (text: string) => {
-    setInput(text);
-  };
+  // send helper
+  async function send(text) {
+    if (!text || !text.trim() || !eventId) return;
+    const clean = text.trim();
 
-  // Send a message: write user message (with user_id), then call /api/chat to get assistant
-  const handleSend = async () => {
-    const text = input.trim();
-    if (!text || !userId || !eventId || sending) return;
+    // optimistic echo of MY message so UI feels instant
+    const tempUserMsg = {
+      id: `temp-${Date.now()}`,
+      event_id: eventId,
+      role,
+      content: clean,
+      created_at: new Date().toISOString(),
+    };
+    setMessages((m) => [...m, tempUserMsg]);
 
     setSending(true);
-    setInput("");
-
-    // 1) insert the user’s message (RLS needs user_id)
-    const { error: insertErr } = await supabase.from("messages").insert([
-      {
-        event_id: eventId,
-        user_id: userId,
-        role,           // "referrer" | "vendor" | "host"
-        content: text,
-      },
-    ]);
-    if (insertErr) {
-      console.error("insert message error", insertErr);
-      setSending(false);
-      return;
-    }
-
-    // 2) ask the assistant (server will save assistant message with user_id)
     try {
-      const r = await fetch("/api/chat", {
+      const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           event_id: eventId,
           role,
-          content: text,
+          content: clean,
         }),
       });
-      if (!r.ok) {
-        const t = await r.text();
-        console.error("chat route error", t);
+      if (!res.ok) {
+        console.error("chat POST failed");
       }
     } catch (e) {
       console.error(e);
     } finally {
       setSending(false);
     }
-  };
+  }
+
+  // click suggestion → send immediately
+  function handlePickSuggestion(t) {
+    setInput("");
+    send(t);
+  }
+
+  function onKeyDown(e) {
+    // Enter = newline; Cmd/Ctrl+Enter = send
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      send(input);
+      setInput("");
+    }
+  }
 
   if (loading) {
     return (
-      <div className="min-h-[40vh] grid place-items-center text-sm text-neutral-300">
-        Loading chat…
-      </div>
-    );
-  }
-
-  if (!userId) {
-    // gated by <UserGate/> up-stack; this is just a safety
-    return (
-      <div className="min-h-[40vh] grid place-items-center text-sm text-neutral-300">
-        Sign in to start chatting.
+      <div className="min-h-[60vh] grid place-items-center text-neutral-300">
+        Warming up your copilot…
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full bg-[#0f0f0f] text-white">
-      <div className="flex items-center justify-between p-4 border-b border-gray-800">
+    <div className="flex flex-col h-full bg-[#0b0b0b] text-white rounded-2xl overflow-hidden border border-[#1f3b2d]">
+      {/* Header */}
+      <div className="flex items-center justify-between p-4 border-b border-[#1f3b2d]">
         <h2 className="text-lg font-semibold">{header}</h2>
-        <div className="text-xs text-neutral-400">
-          Event: <span className="font-mono">{eventId}</span>
-        </div>
+        <div className="text-xs text-[#9adbb0]">{sending ? "Responding…" : ""}</div>
       </div>
 
-      <div className="px-4 pt-3">
-        <SuggestedPrompts role={role} onPick={handlePickPrompt} />
-      </div>
-
+      {/* Message list */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {messages.map((m) => (
           <ChatBubble key={m.id} role={m.role} content={m.content} />
@@ -167,38 +175,38 @@ export default function AIChatPage({ role = "referrer", header = "Capitalize" })
         <div ref={endRef} />
       </div>
 
-      <div className="p-3 border-t border-gray-800">
-        <div className="flex gap-2">
-          <textarea
-            className="flex-1 resize-none h-[64px] p-2 bg-gray-900 rounded text-white outline-none"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Type here… (Shift+Enter = new line, Enter = send)"
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
-          />
-          <button
-            className="bg-emerald-600 hover:bg-emerald-700 px-4 py-2 rounded font-semibold disabled:opacity-60"
-            onClick={handleSend}
-            disabled={sending || !input.trim()}
-          >
-            {sending ? "Sending…" : "Send"}
-          </button>
-        </div>
-        {sending && (
-          <div className="text-xs text-neutral-400 mt-2">Responding…</div>
-        )}
+      {/* Suggested prompts (context-aware later; for now role-based) */}
+      <div className="px-4 pb-2">
+        <SuggestedPrompts role={role} onPick={handlePickSuggestion} compact />
       </div>
 
-      {role === "referrer" && (
-        <div className="border-t border-gray-800">
-          <LeadQuickCapture />
+      {/* Composer */}
+      <div className="p-3 border-t border-[#1f3b2d]">
+        <div className="flex items-end gap-2">
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={onKeyDown}
+            rows={3}
+            placeholder="Type here. Enter = newline. Ctrl/Cmd+Enter = Send."
+            className="flex-1 resize-none rounded-xl bg-[#0f1a14] border border-[#1f3b2d] placeholder-[#72b995] px-3 py-2.5 leading-relaxed focus:outline-none"
+          />
+          <button
+            onClick={() => {
+              const t = input;
+              setInput("");
+              send(t);
+            }}
+            disabled={!input.trim() || sending || !eventId}
+            className="shrink-0 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 px-4 py-2 font-semibold"
+          >
+            Send
+          </button>
         </div>
-      )}
+        <div className="mt-1 text-[11px] text-[#72b995]">
+          Pro tip: press Ctrl/Cmd + Enter to send.
+        </div>
+      </div>
     </div>
   );
 }
