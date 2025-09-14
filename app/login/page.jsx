@@ -1,5 +1,4 @@
-const origin = typeof window !== "undefined" ? window.location.origin : "";
-const pathname = typeof window !== "undefined" ? window.location.pathname : "";
+// app/login/page.jsx
 "use client";
 
 import React, { useEffect, useState } from "react";
@@ -9,12 +8,16 @@ export default function LoginPage() {
   const supabase = getSupabase();
   const [busy, setBusy] = useState(false);
 
-  // If already logged in, bounce to /referrer (you can change this)
+  // If already logged in, bounce back to where they came from, or /referrer
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getSession();
       if (data.session) {
-  window.location.href = `${origin}${pathname || "/referrer"}`;
+        const origin =
+          typeof window !== "undefined" ? window.location.origin : "";
+        const pathname =
+          typeof window !== "undefined" ? window.location.pathname : "/referrer";
+        window.location.href = `${origin}${pathname || "/referrer"}`;
       }
     })();
   }, [supabase]);
@@ -24,10 +27,13 @@ export default function LoginPage() {
       setBusy(true);
       const origin =
         typeof window !== "undefined" ? window.location.origin : "";
+      const pathname =
+        typeof window !== "undefined" ? window.location.pathname : "/referrer";
+
       await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${origin}${pathname || "/referrer"}`, // dynamic redirect
+          redirectTo: `${origin}${pathname || "/referrer"}`, // dynamic redirect back
           queryParams: { prompt: "select_account" },
         },
       });
