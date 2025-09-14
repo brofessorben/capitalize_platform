@@ -1,10 +1,10 @@
 // app/api/chat/route.ts
 import { NextResponse } from "next/server";
-import { getSupabase } from "@/lib/supabaseClient";
+import { getServerSupabase } from "@/lib/supabaseClient";
 
-const BULLET = "•"; // real bullet character
+const BULLET = "•";
 
-// quick “live” web search via SerpAPI
+// Tiny live search via SerpAPI (optional)
 async function vendorSearch(q: string) {
   try {
     const key = process.env.SERPAPI_KEY;
@@ -20,21 +20,20 @@ async function vendorSearch(q: string) {
     if (!r.ok) return null;
     const j = await r.json();
 
-    const items: Array<{ title: string; link: string; snippet?: string }> | undefined =
-      j?.organic_results?.slice(0, 5)?.map((o: any) => ({
-        title: o.title,
-        link: o.link,
-        snippet: o.snippet,
-      }));
+    const items:
+      | Array<{ title: string; link: string; snippet?: string }>
+      | undefined = j?.organic_results?.slice(0, 5)?.map((o: any) => ({
+      title: o.title,
+      link: o.link,
+      snippet: o.snippet,
+    }));
 
     if (!items?.length) return null;
 
     const lines = items
       .map(
         (it) =>
-          `${BULLET} ${it.title}\n  ${it.link}${
-            it.snippet ? `\n  ${it.snippet}` : ""
-          }`
+          `${BULLET} ${it.title}\n  ${it.link}${it.snippet ? `\n  ${it.snippet}` : ""}`
       )
       .join("\n\n");
 
@@ -49,32 +48,58 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { event_id, role, content } = body as {
       event_id: string;
-      role: string;
+      role: "referrer" | "vendor" | "host" | "assistant" | string;
       content: string;
     };
 
-    const supabase = getSupabase();
+    // Server-side Supabase (with auth)
+    const supabase = getServerSupabase();
 
-    // get logged in user
-    const { data: u } = await supabase.auth.getUser();
-    const uid = u?.user?.id;
-    if (!uid) throw new Error("No auth user");
+    // Who is calling?
+    const {
+      data: { user },
+      error: userErr,
+    } = await supabase.auth.getUser();
 
-    // optional quick lookup
+    if (userErr || !user) {
+      return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+    }
+
+    // Normalize role coming from client
+    const safeRole: "referrer" | "vendor" | "host" =
+      role === "vendor" || role === "host" ? role : "referrer";
+
+    // 1) SAVE THE USER'S MESSAGE FIRST
+    if (content && content.trim()) {
+      const { error: insertUserErr } = await supabase.from("messages").insert([
+        {
+          event_id,
+          user_id: user.id,
+          role: safeRole,
+          content: content.trim(),
+        },
+      ]);
+      if (insertUserErr) {
+        console.error("insert user message error:", insertUserErr);
+        // not fatal, but let’s surface
+      }
+    }
+
+    // 2) OPTIONAL: quick live lookup if it sounds like discovery
     let liveNote: string | null = null;
     if (/find|vendors?|menus?|bbq|food truck|cater|availability|quote/i.test(content)) {
       liveNote = await vendorSearch(content);
     }
 
+    // 3) STYLE RULES for AI output (plain text, real bullets, short headings, end w/ Next step)
     const system =
       "You are CAPITALIZE, an event ops co-pilot for referrers, vendors, and hosts. Output MUST be plain text (no markdown markers, no **). Use real bullets with '• '. Use short section titles with a trailing colon, each on its own line (e.g., 'Plan:' then bullets). Prefer concise lists. Use tasteful emojis sparingly. Always end with exactly one 'Next step:' line.";
 
-    // load last 30 messages for this event + this user
+    // Build brief context from recent thread history
     const { data: history } = await supabase
       .from("messages")
-      .select("role, content")
+      .select("role, content, user_id")
       .eq("event_id", event_id)
-      .eq("user_id", uid)
       .order("created_at", { ascending: true })
       .limit(30);
 
@@ -84,10 +109,13 @@ export async function POST(req: Request) {
         role: m.role === "assistant" ? "assistant" : "user",
         content: m.content,
       })),
-      { role: "user", content: content + (liveNote ? `\n\n${liveNote}` : "") },
+      {
+        role: "user",
+        content: content + (liveNote ? `\n\n${liveNote}` : ""),
+      },
     ];
 
-    // call OpenAI
+    // 4) Call OpenAI
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -110,10 +138,13 @@ export async function POST(req: Request) {
     const j = await r.json();
     const reply: string = j.choices?.[0]?.message?.content?.trim() || "Done.";
 
-    // store assistant reply WITH user_id
-    await supabase.from("messages").insert([
-      { event_id, user_id: uid, role: "assistant", content: reply },
+    // 5) SAVE THE ASSISTANT REPLY
+    const { error: insertAiErr } = await supabase.from("messages").insert([
+      { event_id, role: "assistant", content: reply },
     ]);
+    if (insertAiErr) {
+      console.error("insert assistant message error:", insertAiErr);
+    }
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {
