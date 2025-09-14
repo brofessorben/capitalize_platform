@@ -7,52 +7,58 @@ import { getSupabase } from "@/lib/supabaseClient";
  * UserGate
  * - If signed in: renders children
  * - If signed out: shows a simple Google sign-in screen
+ * - Robust against stuck "Checking session…" after account switches
  */
 export default function UserGate({ children, title = "Sign in to continue" }) {
   const supabase = getSupabase();
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState(null);
 
+  // Load session once and subscribe to changes
   useEffect(() => {
-    let isMounted = true;
+    let cancelled = false;
 
-    // get current session
-    supabase.auth.getSession().then(({ data }) => {
-      if (!isMounted) return;
-      setSession(data.session);
-      setLoading(false);
-    });
+    (async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (!cancelled) setSession(data.session ?? null);
+      } catch {
+        if (!cancelled) setSession(null);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
 
-    // listen for auth changes
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
-      setSession(sess);
-      setLoading(false);
+    const { data: sub } = supabase.auth.onAuthStateChange((_evt, sess) => {
+      if (!cancelled) {
+        setSession(sess);
+        setLoading(false);
+      }
     });
 
     return () => {
-      isMounted = false;
+      cancelled = true;
       sub?.subscription?.unsubscribe();
     };
   }, [supabase]);
 
   async function signInWithGoogle() {
-    try {
-      setLoading(true);
-      const origin =
-        typeof window !== "undefined" ? window.location.origin : "";
-      const pathname =
-        typeof window !== "undefined" ? window.location.pathname : "";
+    // Compute where to land after Google -> back to the page the user clicked from
+    const origin =
+      typeof window !== "undefined" ? window.location.origin : "";
+    const path =
+      typeof window !== "undefined" ? window.location.pathname : "";
+    const redirectTo = `${origin}${path || "/referrer"}`;
 
-      await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: {
-          redirectTo: `${origin}${pathname || "/referrer"}`, // dynamic redirect with fallback
-          queryParams: { prompt: "select_account" }, // always ask user to pick Google account
-        },
-      });
-    } finally {
-      setLoading(false);
-    }
+    setLoading(true);
+    await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo,
+        queryParams: { prompt: "select_account" }, // force account picker
+      },
+    });
+    // NOTE: we don't setLoading(false) here; browser navigates to Google.
   }
 
   async function signOut() {
@@ -88,7 +94,7 @@ export default function UserGate({ children, title = "Sign in to continue" }) {
     );
   }
 
-  // Signed in → show the gated content + a tiny account bar
+  // Signed in → show gated content and a tiny account bar
   return (
     <div className="min-h-[60vh]">
       <div className="flex items-center justify-end gap-3 px-4 py-2 text-xs text-neutral-300">
