@@ -1,239 +1,204 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { getSupabase } from "@/lib/supabaseClient";
 import ChatBubble from "./ChatBubble";
 import SuggestedPrompts from "./suggestedprompts";
-import { getSupabase } from "@/lib/supabaseClient";
+import LeadQuickCapture from "./LeadQuickCapture";
 
-export default function AIChatPage({ role = "referrer", header = "Console" }) {
+export default function AIChatPage({ role = "referrer", header = "Capitalize" }) {
   const supabase = getSupabase();
-
-  const [threads, setThreads] = useState([]);
-  const [activeThreadId, setActiveThreadId] = useState(null);
-  const [messages, setMessages] = useState([]);
+  const [userId, setUserId] = useState(null);
+  const [eventId, setEventId] = useState<string | null>(null); // your page may set this; fallback below
+  const [messages, setMessages] = useState<any[]>([]);
   const [input, setInput] = useState("");
-  const [isTyping, setIsTyping] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const endRef = useRef<HTMLDivElement | null>(null);
 
-  const messagesEndRef = useRef(null);
-
-  // load threads
+  // Scroll to bottom when messages change
   useEffect(() => {
-    const load = async () => {
-      const { data } = await supabase
-        .from("events")
-        .select("*")
-        .eq("role", role)
-        .order("created_at", { ascending: false })
-        .limit(50);
-      setThreads(data || []);
-      if (!activeThreadId && (data?.length ?? 0) > 0) setActiveThreadId(data[0].id);
-    };
-    load();
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
-    const ch = supabase
-      .channel(`threads-${role}`)
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "events", filter: `role=eq.${role}` },
-        (payload) => setThreads((prev) => [payload.new, ...prev])
-      )
-      .subscribe();
-    return () => supabase.removeChannel(ch);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [role]);
-
-  // load + subscribe messages
+  // Load user + pick a default event if none
   useEffect(() => {
-    if (!activeThreadId) return setMessages([]);
+    (async () => {
+      const { data } = await supabase.auth.getUser();
+      if (!data?.user?.id) {
+        setLoading(false);
+        return;
+      }
+      setUserId(data.user.id);
+
+      // Fallback event_id if your page didn’t set one; you can replace with real thread picker
+      setEventId((prev) => prev || "default");
+
+      setLoading(false);
+    })();
+  }, [supabase]);
+
+  // Load messages for this user + event
+  useEffect(() => {
+    if (!userId || !eventId) return;
+
+    let cancelled = false;
 
     const load = async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("messages")
         .select("*")
-        .eq("event_id", activeThreadId)
+        .eq("user_id", userId)
+        .eq("event_id", eventId)
         .order("created_at", { ascending: true });
-      setMessages(data || []);
+
+      if (!cancelled) {
+        if (error) console.error("fetch messages error", error);
+        setMessages(data || []);
+      }
     };
+
     load();
 
-    const ch = supabase
-      .channel(`messages-${activeThreadId}`)
+    // realtime inserts for this event & user
+    const channel = supabase
+      .channel(`realtime-messages-${userId}-${eventId}`)
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages", filter: `event_id=eq.${activeThreadId}` },
-        (payload) => setMessages((prev) => [...prev, payload.new])
+        { event: "INSERT", schema: "public", table: "messages", filter: `user_id=eq.${userId}` },
+        (payload) => {
+          if (payload.new.event_id === eventId) {
+            setMessages((prev) => [...prev, payload.new]);
+          }
+        }
       )
       .subscribe();
-    return () => supabase.removeChannel(ch);
-  }, [activeThreadId, supabase]);
 
-  // auto-scroll
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, [supabase, userId, eventId]);
 
-  async function ensureThread() {
-    if (activeThreadId) return activeThreadId;
-    const titleSeed = input.trim().slice(0, 60) || "New Thread";
-    const { data, error } = await supabase
-      .from("events")
-      .insert([{ title: titleSeed, role, status: "open" }])
-      .select()
-      .single();
-    if (error) {
-      console.error(error);
-      return null;
-    }
-    setThreads((p) => [data, ...p]);
-    setActiveThreadId(data.id);
-    return data.id;
-  }
+  // Handle click on a suggested prompt
+  const handlePickPrompt = (text: string) => {
+    setInput(text);
+  };
 
-  async function send(text) {
-    const content = (text ?? input).trim();
-    if (!content) return;
-    const threadId = await ensureThread();
-    if (!threadId) return;
+  // Send a message: write user message (with user_id), then call /api/chat to get assistant
+  const handleSend = async () => {
+    const text = input.trim();
+    if (!text || !userId || !eventId || sending) return;
 
-    // user message
-    const { error: insErr } = await supabase
-      .from("messages")
-      .insert([{ event_id: threadId, role, content }]);
-    if (insErr) {
-      console.error(insErr);
-      return;
-    }
+    setSending(true);
     setInput("");
 
-    // call assistant
+    // 1) insert the user’s message (RLS needs user_id)
+    const { error: insertErr } = await supabase.from("messages").insert([
+      {
+        event_id: eventId,
+        user_id: userId,
+        role,           // "referrer" | "vendor" | "host"
+        content: text,
+      },
+    ]);
+    if (insertErr) {
+      console.error("insert message error", insertErr);
+      setSending(false);
+      return;
+    }
+
+    // 2) ask the assistant (server will save assistant message with user_id)
     try {
-      setIsTyping(true);
-      await fetch("/api/chat", {
+      const r = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ event_id: threadId, role, content }),
+        body: JSON.stringify({
+          event_id: eventId,
+          role,
+          content: text,
+        }),
       });
+      if (!r.ok) {
+        const t = await r.text();
+        console.error("chat route error", t);
+      }
     } catch (e) {
-      console.error("chat call failed", e);
+      console.error(e);
     } finally {
-      // reply arrives via realtime, but we still stop the indicator
-      setIsTyping(false);
+      setSending(false);
     }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-[40vh] grid place-items-center text-sm text-neutral-300">
+        Loading chat…
+      </div>
+    );
   }
 
-  const lastUserText = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role !== "assistant") return messages[i].content || "";
-    }
-    return "";
-  }, [messages]);
+  if (!userId) {
+    // gated by <UserGate/> up-stack; this is just a safety
+    return (
+      <div className="min-h-[40vh] grid place-items-center text-sm text-neutral-300">
+        Sign in to start chatting.
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col h-full bg-[#0b0d0c] text-white font-[ui-rounded]">
-      {/* Header */}
-      <div className="px-5 pt-6 pb-3 flex items-center justify-between">
-        <h2 className="text-2xl font-semibold tracking-wide">{header}</h2>
-        <button
-          onClick={async () => {
-            const { data, error } = await supabase
-              .from("events")
-              .insert([{ title: "New Thread", role, status: "open" }])
-              .select()
-              .single();
-            if (!error && data) {
-              setThreads((p) => [data, ...p]);
-              setActiveThreadId(data.id);
-            }
-          }}
-          className="rounded-md bg-[#12341f] hover:bg-[#174f2b] px-3 py-2 text-sm"
-        >
-          + New Thread
-        </button>
+    <div className="flex flex-col h-full bg-[#0f0f0f] text-white">
+      <div className="flex items-center justify-between p-4 border-b border-gray-800">
+        <h2 className="text-lg font-semibold">{header}</h2>
+        <div className="text-xs text-neutral-400">
+          Event: <span className="font-mono">{eventId}</span>
+        </div>
       </div>
 
-      {/* Chat area */}
-      <div className="px-5 pb-2 flex-1 overflow-y-auto space-y-3">
-        {messages.length === 0 && (
-          <div className="rounded-lg border border-[#1e2a23] bg-[#0f1713] p-4 text-[#b7d9c6]">
-            Pick a thread below or type—Enter makes a new line. Click <span className="font-semibold">Send</span> when ready.
-          </div>
-        )}
+      <div className="px-4 pt-3">
+        <SuggestedPrompts role={role} onPick={handlePickPrompt} />
+      </div>
 
+      <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {messages.map((m) => (
           <ChatBubble key={m.id} role={m.role} content={m.content} />
         ))}
-
-        {/* Suggestions only here */}
-        <SuggestedPrompts
-          role={role}
-          lastText={lastUserText}
-          onPick={(t) => send(t)}
-          compact={Boolean(messages.length)}
-        />
-
-        <div ref={messagesEndRef} />
+        <div ref={endRef} />
       </div>
 
-      {/* Composer */}
-      <div className="px-5 pb-3">
-        <div className="flex gap-2 items-end">
+      <div className="p-3 border-t border-gray-800">
+        <div className="flex gap-2">
           <textarea
+            className="flex-1 resize-none h-[64px] p-2 bg-gray-900 rounded text-white outline-none"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            rows={Math.min(8, Math.max(2, Math.ceil((input || "").length / 48)))}
-            placeholder="Type your message… (Enter = newline)"
-            className="flex-1 resize-none rounded-md border border-[#203128] bg-[#0e1713] px-3 py-2 outline-none focus:border-[#2c5e45]"
+            placeholder="Type here… (Shift+Enter = new line, Enter = send)"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
           />
           <button
-            onClick={() => send()}
-            className="rounded-md bg-[#1a6a44] hover:bg-[#178950] px-4 py-2 font-medium"
+            className="bg-emerald-600 hover:bg-emerald-700 px-4 py-2 rounded font-semibold disabled:opacity-60"
+            onClick={handleSend}
+            disabled={sending || !input.trim()}
           >
-            Send
+            {sending ? "Sending…" : "Send"}
           </button>
         </div>
-
-        {/* Typing indicator */}
-        <div className="mt-2 text-xs text-[#8fb4a3] flex items-center gap-2">
-          {isTyping && (
-            <span className="inline-flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-[#8fb4a3] animate-pulse" />
-              Responding…
-            </span>
-          )}
-        </div>
+        {sending && (
+          <div className="text-xs text-neutral-400 mt-2">Responding…</div>
+        )}
       </div>
 
-      {/* Thread list footer */}
-      <div className="px-5 pb-6">
-        <div className="rounded-lg border border-[#1e2a23] bg-[#0f1713]">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-[#1e2a23]">
-            <div className="font-medium text-[#c9fdd7]">Your Threads</div>
-          </div>
-          <div className="p-2">
-            {threads.length === 0 ? (
-              <div className="text-sm text-[#88a698] px-2 py-3">No threads yet. Make one!</div>
-            ) : (
-              <ul className="divide-y divide-[#1e2a23]">
-                {threads.map((t) => (
-                  <li key={t.id}>
-                    <button
-                      onClick={() => setActiveThreadId(t.id)}
-                      className={`w-full text-left px-3 py-3 hover:bg-[#121c16] ${
-                        activeThreadId === t.id ? "bg-[#121c16]" : ""
-                      }`}
-                    >
-                      <div className="text-sm font-medium">{t.title}</div>
-                      <div className="text-xs text-[#7ea293]">
-                        {new Date(t.created_at).toLocaleString()}
-                      </div>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+      {role === "referrer" && (
+        <div className="border-t border-gray-800">
+          <LeadQuickCapture />
         </div>
-      </div>
+      )}
     </div>
   );
 }
