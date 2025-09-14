@@ -7,72 +7,76 @@ export default function UserGate({ children, title = "Sign in to continue" }) {
   const supabase = getSupabase();
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState(null);
+  const [note, setNote] = useState(""); // tiny debug banner
 
-  // 1) Finalize session on first load (handles #access_token hash from Supabase)
   useEffect(() => {
-    let alive = true;
+    let mounted = true;
 
-    (async () => {
-      try {
-        // If we just came back from OAuth, the URL will have a hash with tokens.
-        const hasHash =
-          typeof window !== "undefined" &&
-          window.location.hash &&
-          /access_token=|refresh_token=/.test(window.location.hash);
+    async function boot() {
+      // 1) first try: session right now
+      const { data } = await supabase.auth.getSession();
+      if (!mounted) return;
 
-        const { data: s } = await supabase.auth.getSession();
-        if (!alive) return;
-
-        setSession(s.session);
+      if (data.session) {
+        setSession(data.session);
         setLoading(false);
-
-        // Clean up the URL (remove the hash) once the session is stored
-        if (hasHash && typeof window !== "undefined") {
-          window.history.replaceState(null, "", window.location.pathname);
-        }
-      } catch {
-        setLoading(false);
+        setNote("session from getSession()");
+        return;
       }
-    })();
 
-    // Safety: never hang forever if something goes weird
-    const t = setTimeout(() => alive && setLoading(false), 4000);
+      // 2) wait for OAuth hash to be processed
+      const { data: sub } = supabase.auth.onAuthStateChange((evt, sess) => {
+        if (!mounted) return;
+        if (sess) {
+          setSession(sess);
+          setLoading(false);
+          setNote(`session via onAuthStateChange (${evt})`);
+        }
+      });
 
+      // 3) fallback: small delay and try again (covers slow hash parsing)
+      setTimeout(async () => {
+        if (!mounted) return;
+        const { data: d2 } = await supabase.auth.getSession();
+        if (d2.session) {
+          setSession(d2.session);
+          setLoading(false);
+          setNote("session after retry");
+        } else {
+          setLoading(false); // show login
+          setNote("no session");
+        }
+      }, 400);
+
+      return () => sub?.subscription?.unsubscribe();
+    }
+
+    boot();
     return () => {
-      alive = false;
-      clearTimeout(t);
+      mounted = false;
     };
   }, [supabase]);
 
-  // 2) Keep session in sync with auth state changes
-  useEffect(() => {
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
-      setSession(s ?? null);
-      setLoading(false);
-    });
-    return () => sub.subscription?.unsubscribe();
-  }, [supabase]);
-
   async function signInWithGoogle() {
-    setLoading(true);
     const origin =
       typeof window !== "undefined" ? window.location.origin : "";
     const pathname =
-      typeof window !== "undefined" ? window.location.pathname : "";
+      typeof window !== "undefined" ? window.location.pathname : "/";
 
+    // send user back to the page they were on
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${origin}${pathname || "/referrer"}`,
+        redirectTo: `${origin}${pathname}`,
         queryParams: { prompt: "select_account" },
       },
     });
   }
 
   async function signOut() {
-    setLoading(true);
     await supabase.auth.signOut();
-    setLoading(false);
+    // hard refresh to clear any stale state
+    if (typeof window !== "undefined") window.location.reload();
   }
 
   if (loading) {
@@ -87,6 +91,9 @@ export default function UserGate({ children, title = "Sign in to continue" }) {
     return (
       <div className="min-h-[70vh] flex items-center justify-center p-6">
         <div className="w-full max-w-md rounded-2xl border border-neutral-800 bg-neutral-900/70 p-6 text-white">
+          {note && (
+            <div className="mb-3 text-[10px] opacity-60">debug: {note}</div>
+          )}
           <div className="text-xl font-semibold mb-2">{title}</div>
           <p className="text-neutral-300 text-sm mb-6">
             Use your Google account to access your threads, events, and messages.
@@ -102,7 +109,6 @@ export default function UserGate({ children, title = "Sign in to continue" }) {
     );
   }
 
-  // Signed in
   return (
     <div className="min-h-[60vh]">
       <div className="flex items-center justify-end gap-3 px-4 py-2 text-xs text-neutral-300">
