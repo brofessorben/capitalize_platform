@@ -14,7 +14,7 @@ export default function LoginPage() {
     (async () => {
       const { data } = await supabase.auth.getSession();
       if (data.session) {
-        window.location.href = "/referrer";
+  window.location.href = `${origin}${pathname || "/referrer"}`;
       }
     })();
   }, [supabase]);
