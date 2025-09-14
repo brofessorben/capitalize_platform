@@ -36,16 +36,23 @@ export default function UserGate({ children, title = "Sign in to continue" }) {
   }, [supabase]);
 
   async function signInWithGoogle() {
-    setLoading(true);
-    await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo:
-  typeof window !== "undefined"
-    ? `${window.location.origin}${window.location.pathname}`
-    : undefined,
-      },
-    });
+    try {
+      setLoading(true);
+      const origin =
+        typeof window !== "undefined" ? window.location.origin : "";
+      const pathname =
+        typeof window !== "undefined" ? window.location.pathname : "";
+
+      await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${origin}${pathname || "/referrer"}`, // dynamic redirect with fallback
+          queryParams: { prompt: "select_account" }, // always ask user to pick Google account
+        },
+      });
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function signOut() {
