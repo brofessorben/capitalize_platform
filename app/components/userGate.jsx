@@ -41,9 +41,9 @@ export default function UserGate({ children, title = "Sign in to continue" }) {
       provider: "google",
       options: {
         redirectTo:
-          typeof window !== "undefined"
-            ? `${window.location.origin}/`
-            : undefined,
+  typeof window !== "undefined"
+    ? `${window.location.origin}${window.location.pathname}`
+    : undefined,
       },
     });
   }
