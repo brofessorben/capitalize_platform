@@ -1,53 +1,99 @@
 // lib/chatStore.ts
-import { getServerSupabase, getSupabase } from "./supabaseClient";
+import { getSupabase } from "./supabaseClient";
 
 /** THREADS (aka events) */
-export async function listThreads(role: string) {
+export async function listThreads(role?: string) {
   const supabase = getSupabase();
-  return supabase.from("events")
+  const {
+    data: { user },
+    error: userErr,
+  } = await supabase.auth.getUser();
+  if (userErr || !user) throw new Error("Not authenticated");
+
+  let q = supabase
+    .from("threads")
     .select("*")
-    .eq("role", role)
-    .order("updated_at", { ascending: false });
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false });
+
+  if (role) q = q.eq("role", role);
+
+  const { data, error } = await q;
+  if (error) throw new Error(error.message);
+  return data ?? [];
 }
 
-export async function createThread(title: string, role: string) {
+export async function createThread(title: string, role?: string) {
   const supabase = getSupabase();
+  const {
+    data: { user },
+    error: userErr,
+  } = await supabase.auth.getUser();
+  if (userErr || !user) throw new Error("Not authenticated");
+
+  const payload: any = { user_id: user.id, title, role: role ?? null };
+
   const { data, error } = await supabase
-    .from("events")
-    .insert([{ title, role, status: "open" }])
-    .select("*")
+    .from("threads")
+    .insert([payload] as any)
+    .select()
     .single();
-  return { data, error };
+
+  if (error) throw new Error(error.message);
+  return data;
 }
 
 /** MESSAGES */
-export async function listMessages(threadId: string) {
+export async function listMessages(lead_id: string) {
   const supabase = getSupabase();
-  return supabase
+  const {
+    data: { user },
+    error: userErr,
+  } = await supabase.auth.getUser();
+  if (userErr || !user) throw new Error("Not authenticated");
+
+  const { data, error } = await supabase
     .from("messages")
     .select("*")
-    .eq("event_id", threadId)
+    .eq("user_id", user.id)
+    .eq("lead_id", lead_id)
     .order("created_at", { ascending: true });
+
+  if (error) throw new Error(error.message);
+  return data ?? [];
 }
 
-export async function sendMessage(threadId: string, sender: string, content: string) {
+export async function sendMessage(opts: {
+  lead_id: string;
+  text: string;
+  role?: "user" | "ai";
+  sender?: "vendor" | "host" | "referrer" | "ai";
+}) {
+  const { lead_id, text } = opts;
+  const role = opts.role ?? "user";
+  const sender = opts.sender ?? role;
+
   const supabase = getSupabase();
-  return supabase
+  const {
+    data: { user },
+    error: userErr,
+  } = await supabase.auth.getUser();
+  if (userErr || !user) throw new Error("Not authenticated");
+
+  const payload: any = {
+    user_id: user.id,
+    lead_id,
+    text,
+    role,
+    sender,
+  };
+
+  const { data, error } = await supabase
     .from("messages")
-    .insert([{ event_id: threadId, role: sender, content }])
-    .select("*")
+    .insert([payload] as any)
+    .select()
     .single();
-}
 
-/** REALTIME subscription to a thread */
-export function subscribeMessages(threadId: string, onInsert: (row: any) => void) {
-  const supabase = getSupabase();
-  const channel = supabase
-    .channel(`messages-${threadId}`)
-    .on("postgres_changes",
-      { event: "INSERT", schema: "public", table: "messages", filter: `event_id=eq.${threadId}` },
-      (payload) => onInsert(payload.new)
-    )
-    .subscribe();
-  return () => supabase.removeChannel(channel);
+  if (error) throw new Error(error.message);
+  return data;
 }
