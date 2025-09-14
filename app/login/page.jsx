@@ -1,5 +1,5 @@
-const origin = window.location.origin;
-const pathname = window.location.pathname;
+const origin = typeof window !== "undefined" ? window.location.origin : "";
+const pathname = typeof window !== "undefined" ? window.location.pathname : "";
 "use client";
 
 import React, { useEffect, useState } from "react";
@@ -27,7 +27,7 @@ export default function LoginPage() {
       await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${origin}${pathname || "/referrer"}`,
+          redirectTo: `${origin}${pathname || "/referrer"}`, // dynamic redirect
           queryParams: { prompt: "select_account" },
         },
       });
