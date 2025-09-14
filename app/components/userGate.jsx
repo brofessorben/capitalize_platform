@@ -3,62 +3,70 @@
 import React, { useEffect, useState } from "react";
 import { getSupabase } from "@/lib/supabaseClient";
 
-/**
- * UserGate
- * - If signed in: renders children
- * - If signed out: shows a simple Google sign-in screen
- * - Robust against stuck "Checking session…" after account switches
- */
 export default function UserGate({ children, title = "Sign in to continue" }) {
   const supabase = getSupabase();
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState(null);
 
-  // Load session once and subscribe to changes
+  // 1) Finalize session on first load (handles #access_token hash from Supabase)
   useEffect(() => {
-    let cancelled = false;
+    let alive = true;
 
     (async () => {
       try {
-        const { data } = await supabase.auth.getSession();
-        if (!cancelled) setSession(data.session ?? null);
+        // If we just came back from OAuth, the URL will have a hash with tokens.
+        const hasHash =
+          typeof window !== "undefined" &&
+          window.location.hash &&
+          /access_token=|refresh_token=/.test(window.location.hash);
+
+        const { data: s } = await supabase.auth.getSession();
+        if (!alive) return;
+
+        setSession(s.session);
+        setLoading(false);
+
+        // Clean up the URL (remove the hash) once the session is stored
+        if (hasHash && typeof window !== "undefined") {
+          window.history.replaceState(null, "", window.location.pathname);
+        }
       } catch {
-        if (!cancelled) setSession(null);
-      } finally {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
       }
     })();
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_evt, sess) => {
-      if (!cancelled) {
-        setSession(sess);
-        setLoading(false);
-      }
-    });
+    // Safety: never hang forever if something goes weird
+    const t = setTimeout(() => alive && setLoading(false), 4000);
 
     return () => {
-      cancelled = true;
-      sub?.subscription?.unsubscribe();
+      alive = false;
+      clearTimeout(t);
     };
   }, [supabase]);
 
+  // 2) Keep session in sync with auth state changes
+  useEffect(() => {
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
+      setSession(s ?? null);
+      setLoading(false);
+    });
+    return () => sub.subscription?.unsubscribe();
+  }, [supabase]);
+
   async function signInWithGoogle() {
-    // Compute where to land after Google -> back to the page the user clicked from
+    setLoading(true);
     const origin =
       typeof window !== "undefined" ? window.location.origin : "";
-    const path =
+    const pathname =
       typeof window !== "undefined" ? window.location.pathname : "";
-    const redirectTo = `${origin}${path || "/referrer"}`;
 
-    setLoading(true);
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo,
-        queryParams: { prompt: "select_account" }, // force account picker
+        redirectTo: `${origin}${pathname || "/referrer"}`,
+        queryParams: { prompt: "select_account" },
       },
     });
-    // NOTE: we don't setLoading(false) here; browser navigates to Google.
   }
 
   async function signOut() {
@@ -94,7 +102,7 @@ export default function UserGate({ children, title = "Sign in to continue" }) {
     );
   }
 
-  // Signed in → show gated content and a tiny account bar
+  // Signed in
   return (
     <div className="min-h-[60vh]">
       <div className="flex items-center justify-end gap-3 px-4 py-2 text-xs text-neutral-300">
