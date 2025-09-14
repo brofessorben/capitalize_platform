@@ -6,7 +6,6 @@ import { getSupabase } from "@/lib/supabaseClient";
 export async function GET(req: Request) {
   const supabase = getSupabase();
 
-  // who is calling?
   const {
     data: { user },
     error: userErr,
@@ -20,7 +19,6 @@ export async function GET(req: Request) {
   const lead_id = searchParams.get("lead_id");
   const limit = Number(searchParams.get("limit") ?? 100);
 
-  // fetch this user's messages (optionally scoped to a lead/thread)
   let query = supabase
     .from("messages")
     .select("*")
@@ -57,28 +55,30 @@ export async function POST(req: Request) {
   try {
     body = await req.json();
   } catch {
-    // no-op
+    // ignore
   }
 
   const text = typeof body?.text === "string" ? body.text.trim() : "";
   const lead_id = body?.lead_id ?? null;
   const role = body?.role ?? "user";
-  const sender = body?.sender ?? role; // basic mirror
+  const sender = body?.sender ?? role;
 
   if (!text) {
     return NextResponse.json({ error: "Missing 'text' in request body" }, { status: 400 });
   }
 
-  // insert the message with the current user's id
+  // 👇 TypeScript-safe: insert an ARRAY and cast payload to any to avoid 'never' inference
+  const payload: any = {
+    user_id: user.id,
+    lead_id,
+    text,
+    role,
+    sender,
+  };
+
   const { data, error } = await supabase
     .from("messages")
-    .insert({
-      user_id: user.id,
-      lead_id,
-      text,
-      role,
-      sender,
-    })
+    .insert([payload] as any)
     .select()
     .single();
 
