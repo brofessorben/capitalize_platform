@@ -17,7 +17,6 @@ export default function EventList({ role = "referrer", onSelect }) {
   const [creating, setCreating] = useState(false);
   const [active, setActive] = useState(null);
 
-  // Load most recent events (you can scope by owner later)
   useEffect(() => {
     async function run() {
       const { data, error } = await supabase
@@ -33,13 +32,16 @@ export default function EventList({ role = "referrer", onSelect }) {
   async function createNew() {
     try {
       setCreating(true);
+      const niceTitle =
+        (role?.charAt(0).toUpperCase() + role?.slice(1)) +
+        " Thread";
       const { data, error } = await supabase
         .from("events")
-        .insert([{ title: "New Thread", role }])
+        .insert([{ title: niceTitle, role }])
         .select()
         .single();
       if (error) throw error;
-      // Put it at the top and activate it
+      // top of list + activate
       setEvents((prev) => [data, ...prev]);
       setActive(data.id);
       onSelect && onSelect(data.id);
@@ -54,6 +56,12 @@ export default function EventList({ role = "referrer", onSelect }) {
   function activate(id) {
     setActive(id);
     onSelect && onSelect(id);
+  }
+
+  function label(ev) {
+    const when = new Date(ev.created_at).toLocaleString();
+    const title = ev.title || `${ev.role?.toUpperCase() || "Thread"} Thread`;
+    return `${title} • ${when}`;
   }
 
   return (
@@ -71,7 +79,7 @@ export default function EventList({ role = "referrer", onSelect }) {
       </div>
 
       {events.length === 0 ? (
-        <div className="rounded-xl border border-white/10 bg-black/30 p-4 text-sm opacity-70">
+        <div className="rounded-xl border border-white/10 bg-black/30 p-4 text-sm opacity-80">
           No threads yet. Make one!
         </div>
       ) : (
@@ -84,9 +92,7 @@ export default function EventList({ role = "referrer", onSelect }) {
               }`}
               onClick={() => activate(ev.id)}
             >
-              <div className="text-sm font-medium">
-                {ev.title || "Thread"} • {new Date(ev.created_at).toLocaleString()}
-              </div>
+              <div className="text-sm font-medium">{label(ev)}</div>
               <div className="text-xs opacity-60">ID: {ev.id}</div>
             </li>
           ))}
