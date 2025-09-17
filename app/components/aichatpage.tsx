@@ -1,68 +1,94 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const supabase = createClient(supabaseUrl, supabaseAnon);
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
+const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string;
+const supabase: SupabaseClient = createClient(supabaseUrl, supabaseAnon);
 
-function useAutoScroll(dep) {
-  const listRef = useRef(null);
+type Role = "referrer" | "vendor" | "host" | "assistant" | string;
+
+type MessageRow = {
+  id: string;
+  event_id: string;
+  role: Role;
+  content: string;
+  created_at: string;
+};
+
+function useAutoScroll(dep: unknown) {
+  const listRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+    if (listRef.current) {
+      listRef.current.scrollTop = listRef.current.scrollHeight;
+    }
   }, [dep]);
   return listRef;
+}
+
+interface Props {
+  role?: Role;            // "referrer" | "vendor" | "host"
+  header?: string;        // panel title
+  initialEventId?: string | null; // selected thread id from parent
 }
 
 export default function AIChatPage({
   role = "referrer",
   header = "Console",
   initialEventId = null,
-}) {
-  const [eventId, setEventId] = useState(initialEventId);
-  const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
-  const [messages, setMessages] = useState([]);
+}: Props) {
+  const [eventId, setEventId] = useState<string | null>(initialEventId ?? null);
+  const [input, setInput] = useState<string>("");
+  const [sending, setSending] = useState<boolean>(false);
+  const [messages, setMessages] = useState<MessageRow[]>([]);
 
+  // adopt parent-selected event id
   useEffect(() => {
     if (initialEventId) setEventId(initialEventId);
   }, [initialEventId]);
 
-  // Fetch + realtime
+  // fetch + realtime subscribe to messages in this event/thread
   useEffect(() => {
-    let sub;
+    let channel: ReturnType<SupabaseClient["channel"]> | null = null;
+
     async function run() {
       if (!eventId) {
         setMessages([]);
         return;
       }
+
       const { data, error } = await supabase
         .from("messages")
         .select("*")
         .eq("event_id", eventId)
         .order("created_at", { ascending: true });
 
-      if (!error && data) setMessages(data);
+      if (!error && data) setMessages(data as MessageRow[]);
 
-      sub = supabase
+      channel = supabase
         .channel(`messages-event-${eventId}`)
         .on(
           "postgres_changes",
           { event: "INSERT", schema: "public", table: "messages", filter: `event_id=eq.${eventId}` },
-          (payload) => setMessages((m) => [...m, payload.new])
+          (payload) => {
+            const row = payload.new as MessageRow;
+            setMessages((m) => [...m, row]);
+          }
         )
         .subscribe();
     }
+
     run();
+
     return () => {
-      if (sub) supabase.removeChannel(sub);
+      if (channel) supabase.removeChannel(channel);
     };
   }, [eventId]);
 
   const listRef = useAutoScroll(messages);
 
-  async function insertUserMessage(text) {
+  async function insertUserMessage(text: string) {
     const { error } = await supabase
       .from("messages")
       .insert([{ event_id: eventId, role, content: text }]);
@@ -77,12 +103,16 @@ export default function AIChatPage({
       body: JSON.stringify({ event_id: eventId, role }),
     });
     if (!r.ok) {
-      const j = await r.json().catch(() => ({}));
-      console.error("AI call failed:", j?.error || r.statusText);
+      let msg = r.statusText;
+      try {
+        const j = await r.json();
+        msg = j?.error || msg;
+      } catch {}
+      console.error("AI call failed:", msg);
     }
   }
 
-  async function send(text) {
+  async function send(text?: string) {
     const clean = (text ?? input ?? "").trim();
     if (!clean || !eventId) return;
     try {
@@ -90,7 +120,7 @@ export default function AIChatPage({
       await insertUserMessage(clean);
       setInput("");
       await triggerAI();
-    } catch (e) {
+    } catch (e: any) {
       console.error("send failed:", e?.message || e);
       alert("Send failed. Open console for details.");
     } finally {
@@ -98,7 +128,7 @@ export default function AIChatPage({
     }
   }
 
-  const suggestions = useMemo(
+  const suggestions = useMemo<string[]>(
     () => [
       "Draft an intro between vendor + host",
       "Summarize this lead and next steps",
@@ -109,10 +139,10 @@ export default function AIChatPage({
     []
   );
 
-  function onKeyDown(e) {
+  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
       e.preventDefault();
-      send();
+      void send();
     }
   }
 
@@ -125,12 +155,13 @@ export default function AIChatPage({
         </div>
       </div>
 
+      {/* suggestion chips */}
       <div className="mb-3 flex flex-wrap gap-2">
         {suggestions.map((s) => (
           <button
             key={s}
             type="button"
-            onClick={() => send(s)}
+            onClick={() => void send(s)}
             className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-sm hover:bg-emerald-400/20"
           >
             {s}
@@ -138,6 +169,7 @@ export default function AIChatPage({
         ))}
       </div>
 
+      {/* messages list */}
       <div
         ref={listRef}
         className="mb-3 h-64 overflow-y-auto rounded-xl border border-white/10 bg-black/30 p-3"
@@ -160,6 +192,7 @@ export default function AIChatPage({
         )}
       </div>
 
+      {/* input */}
       <div className="flex items-start gap-2">
         <textarea
           rows={3}
@@ -172,7 +205,7 @@ export default function AIChatPage({
         <button
           type="button"
           disabled={sending || !eventId || !input.trim()}
-          onClick={() => send()}
+          onClick={() => void send()}
           className="h-[56px] shrink-0 rounded-xl bg-emerald-500 px-4 font-medium text-black disabled:cursor-not-allowed disabled:opacity-50"
         >
           {sending ? "Sending…" : "Send"}
