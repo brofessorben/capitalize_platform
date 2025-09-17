@@ -1,211 +1,179 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
-import { getSupabase } from "@/lib/supabaseClient";
-import ChatBubble from "./ChatBubble";
-import SuggestedPrompts from "./SuggestedPrompts";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
+
+// ---- Supabase (browser) ----
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabase = createClient(supabaseUrl, supabaseAnon);
+
+// Little helper for scrolling after send
+function useAutoScroll(dep) {
+  const listRef = useRef(null);
+  useEffect(() => {
+    if (listRef.current) {
+      listRef.current.scrollTop = listRef.current.scrollHeight;
+    }
+  }, [dep]);
+  return listRef;
+}
 
 export default function AIChatPage({
   role = "referrer",
-  header = "CAPITALIZE • Copilot",
+  header = "Console",
   initialEventId = null,
 }) {
-  const supabase = getSupabase();
-
-  const [userId, setUserId] = useState(null);
-  const [eventId, setEventId] = useState(initialEventId); // will create one if missing
-  const [messages, setMessages] = useState([]);
+  const [eventId, setEventId] = useState(initialEventId);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [messages, setMessages] = useState([]);
 
-  const endRef = useRef(null);
-
-  // auto scroll
+  // adopt parent-selected event id
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    if (initialEventId) setEventId(initialEventId);
+  }, [initialEventId]);
 
-  // boot: get user, ensure we have an event (thread), load + subscribe
+  // fetch + realtime subscribe to messages in this event/thread
   useEffect(() => {
-    let channel;
-    (async () => {
-      // 1) who’s logged in
-      const { data: sess } = await supabase.auth.getSession();
-      const u = sess?.session?.user;
-      if (!u) {
-        setLoading(false);
+    let sub;
+    async function run() {
+      if (!eventId) {
+        setMessages([]);
         return;
       }
-      setUserId(u.id);
-
-      // 2) ensure an event/thread exists
-      let eid = initialEventId;
-      if (!eid) {
-        // get or create a default thread for this user
-        const { data: existing, error: exErr } = await supabase
-          .from("events")
-          .select("id")
-          .eq("owner_user_id", u.id)
-          .order("created_at", { ascending: true })
-          .limit(1);
-        if (exErr) console.error(exErr);
-
-        if (existing && existing.length) {
-          eid = existing[0].id;
-        } else {
-          const { data: created, error: crErr } = await supabase
-            .from("events")
-            .insert([{ owner_user_id: u.id, title: "New thread" }])
-            .select("id")
-            .single();
-          if (crErr) console.error(crErr);
-          eid = created?.id || null;
-        }
-      }
-      setEventId(eid);
-
-      if (!eid) {
-        setLoading(false);
-        return;
-      }
-
-      // 3) load existing messages
-      const { data: initial, error: loadErr } = await supabase
+      const { data, error } = await supabase
         .from("messages")
         .select("*")
-        .eq("event_id", eid)
+        .eq("event_id", eventId)
         .order("created_at", { ascending: true });
-      if (loadErr) console.error(loadErr);
-      setMessages(initial || []);
+      if (!error && data) setMessages(data);
 
-      // 4) subscribe to live inserts for this thread
-      channel = supabase
-        .channel(`realtime-messages-${eid}`)
+      sub = supabase
+        .channel(`messages-event-${eventId}`)
         .on(
           "postgres_changes",
-          { event: "INSERT", schema: "public", table: "messages", filter: `event_id=eq.${eid}` },
-          (payload) => {
-            setMessages((prev) => [...prev, payload.new]);
-          }
+          { event: "INSERT", schema: "public", table: "messages", filter: `event_id=eq.${eventId}` },
+          (payload) => setMessages((m) => [...m, payload.new])
         )
         .subscribe();
-
-      setLoading(false);
-    })();
-
+    }
+    run();
     return () => {
-      if (channel) supabase.removeChannel(channel);
+      if (sub) supabase.removeChannel(sub);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supabase, initialEventId]);
+  }, [eventId]);
 
-  // send helper
+  const listRef = useAutoScroll(messages);
+
+  // ---- SEND directly to Supabase (no API route) ----
   async function send(text) {
-    if (!text || !text.trim() || !eventId) return;
-    const clean = text.trim();
+    const clean = (text ?? input ?? "").trim();
+    if (!clean || !eventId) return;
 
-    // optimistic echo of MY message so UI feels instant
-    const tempUserMsg = {
-      id: `temp-${Date.now()}`,
-      event_id: eventId,
-      role,
-      content: clean,
-      created_at: new Date().toISOString(),
-    };
-    setMessages((m) => [...m, tempUserMsg]);
-
-    setSending(true);
     try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          event_id: eventId,
-          role,
-          content: clean,
-        }),
-      });
-      if (!res.ok) {
-        console.error("chat POST failed");
-      }
+      setSending(true);
+      const { error } = await supabase
+        .from("messages")
+        .insert([{ event_id: eventId, role, content: clean }]);
+      if (error) throw error;
+      setInput("");
     } catch (e) {
-      console.error(e);
+      console.error("send failed:", e?.message || e);
+      alert("Send failed. Check console for details.");
     } finally {
       setSending(false);
     }
   }
 
-  // click suggestion → send immediately
-  function handlePickSuggestion(t) {
-    setInput("");
-    send(t);
-  }
+  // premade suggestions call the same send()
+  const suggestions = useMemo(
+    () => [
+      "Draft an intro between vendor + host",
+      "Summarize this lead and next steps",
+      "Find 3 local vendors with menus",
+      "Turn this into a text I can send",
+      "Write a tight follow-up",
+    ],
+    []
+  );
 
+  // ctrl/cmd+enter to send
   function onKeyDown(e) {
-    // Enter = newline; Cmd/Ctrl+Enter = send
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
       e.preventDefault();
-      send(input);
-      setInput("");
+      send();
     }
   }
 
-  if (loading) {
-    return (
-      <div className="min-h-[60vh] grid place-items-center text-neutral-300">
-        Warming up your copilot…
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-col h-full bg-[#0b0b0b] text-white rounded-2xl overflow-hidden border border-[#1f3b2d]">
-      {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-[#1f3b2d]">
+    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 md:p-6">
+      <div className="mb-4 flex items-center justify-between">
         <h2 className="text-lg font-semibold">{header}</h2>
-        <div className="text-xs text-[#9adbb0]">{sending ? "Responding…" : ""}</div>
+        <div className="text-xs opacity-70">
+          {eventId ? `Thread: ${eventId}` : "No thread selected"}
+        </div>
       </div>
 
-      {/* Message list */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {messages.map((m) => (
-          <ChatBubble key={m.id} role={m.role} content={m.content} />
-        ))}
-        <div ref={endRef} />
-      </div>
-
-      {/* Suggested prompts (context-aware later; for now role-based) */}
-      <div className="px-4 pb-2">
-        <SuggestedPrompts role={role} onPick={handlePickSuggestion} compact />
-      </div>
-
-      {/* Composer */}
-      <div className="p-3 border-t border-[#1f3b2d]">
-        <div className="flex items-end gap-2">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={onKeyDown}
-            rows={3}
-            placeholder="Type here. Enter = newline. Ctrl/Cmd+Enter = Send."
-            className="flex-1 resize-none rounded-xl bg-[#0f1a14] border border-[#1f3b2d] placeholder-[#72b995] px-3 py-2.5 leading-relaxed focus:outline-none"
-          />
+      {/* suggestion chips */}
+      <div className="mb-3 flex flex-wrap gap-2">
+        {suggestions.map((s) => (
           <button
-            onClick={() => {
-              const t = input;
-              setInput("");
-              send(t);
-            }}
-            disabled={!input.trim() || sending || !eventId}
-            className="shrink-0 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 px-4 py-2 font-semibold"
+            key={s}
+            type="button"
+            onClick={() => send(s)}
+            className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-sm hover:bg-emerald-400/20"
           >
-            Send
+            {s}
           </button>
-        </div>
-        <div className="mt-1 text-[11px] text-[#72b995]">
-          Pro tip: press Ctrl/Cmd + Enter to send.
-        </div>
+        ))}
+      </div>
+
+      {/* messages list */}
+      <div
+        ref={listRef}
+        className="mb-3 h-64 overflow-y-auto rounded-xl border border-white/10 bg-black/30 p-3"
+      >
+        {messages.length === 0 ? (
+          <div className="py-8 text-center text-sm opacity-60">
+            {eventId ? "No messages yet. Say hi!" : "Create or select a thread to start."}
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {messages.map((m) => (
+              <li key={m.id} className="text-sm">
+                <span className="mr-2 rounded bg-white/10 px-2 py-0.5 text-[11px] uppercase tracking-wide">
+                  {m.role}
+                </span>
+                <span>{m.content}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* input */}
+      <div className="flex items-start gap-2">
+        <textarea
+          rows={3}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder="Type here. Enter = newline. Ctrl/Cmd+Enter = Send."
+          className="min-h-[56px] w-full resize-y rounded-xl border border-white/10 bg-black/40 p-3 outline-none"
+        />
+        <button
+          type="button"
+          disabled={sending || !eventId || !input.trim()}
+          onClick={() => send()}
+          className="h-[56px] shrink-0 rounded-xl bg-emerald-500 px-4 font-medium text-black disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {sending ? "Sending…" : "Send"}
+        </button>
+      </div>
+
+      <div className="mt-1 text-xs opacity-50">
+        Pro tip: press <kbd>Ctrl/Cmd</kbd> + <kbd>Enter</kbd> to send.
       </div>
     </div>
   );
