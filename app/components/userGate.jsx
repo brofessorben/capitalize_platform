@@ -14,23 +14,17 @@ export default function UserGate({ children }) {
 
   useEffect(() => {
     let mounted = true;
-
     async function init() {
       const { data } = await supabase.auth.getSession();
       if (mounted) {
         setSession(data.session || null);
         setLoading(false);
       }
-
       const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
         if (mounted) setSession(sess || null);
       });
-
-      return () => {
-        sub.subscription.unsubscribe();
-      };
+      return () => sub.subscription.unsubscribe();
     }
-
     init();
     return () => {
       mounted = false;
@@ -68,5 +62,30 @@ export default function UserGate({ children }) {
     );
   }
 
-  return <>{children}</>;
+  // Authenticated — simple top bar with email + Sign out on every gated page
+  const email = session.user?.email || "Signed in";
+
+  return (
+    <>
+      <header className="sticky top-0 z-20 mb-4 border-b border-white/10 bg-black/70 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 text-sm">
+          <div className="font-semibold">CAPITALIZE</div>
+          <div className="flex items-center gap-3">
+            <span className="opacity-80">{email}</span>
+            <button
+              type="button"
+              onClick={async () => {
+                await supabase.auth.signOut();
+                location.href = "/";
+              }}
+              className="rounded-lg border border-white/15 px-3 py-1.5 hover:bg-white/10"
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+      </header>
+      {children}
+    </>
+  );
 }
