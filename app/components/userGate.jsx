@@ -62,21 +62,27 @@ export default function UserGate({ children }) {
     );
   }
 
-  // Authenticated — simple top bar with email + Sign out on every gated page
   const email = session.user?.email || "Signed in";
 
   return (
     <>
-      <header className="sticky top-0 z-20 mb-4 border-b border-white/10 bg-black/70 backdrop-blur">
+      {/* translucent top bar that sits nicely on the global gradient */}
+      <header className="sticky top-0 z-20 mb-4 border-b border-white/10 bg-black/40 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 text-sm">
-          <div className="font-semibold">CAPITALIZE</div>
+          <div className="font-semibold tracking-wide">CAPITALIZE</div>
+          <nav className="hidden gap-4 md:flex opacity-80">
+            <a href="/referrer" className="hover:opacity-100">Referrer</a>
+            <a href="/vendor" className="hover:opacity-100">Vendor</a>
+            <a href="/host" className="hover:opacity-100">Host</a>
+          </nav>
           <div className="flex items-center gap-3">
-            <span className="opacity-80">{email}</span>
+            <span className="opacity-85">{email}</span>
             <button
               type="button"
               onClick={async () => {
                 await supabase.auth.signOut();
-                location.href = "/";
+                // Take user to homepage explicitly after sign-out
+                window.location.assign("/");
               }}
               className="rounded-lg border border-white/15 px-3 py-1.5 hover:bg-white/10"
             >
@@ -85,7 +91,8 @@ export default function UserGate({ children }) {
           </div>
         </div>
       </header>
-      {children}
+
+      <main className="mx-auto max-w-6xl px-4">{children}</main>
     </>
   );
 }
