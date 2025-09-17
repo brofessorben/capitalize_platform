@@ -8,7 +8,6 @@ export const metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      {/* Inline styles = no dependence on Tailwind arbitrary values */}
       <body
         style={{
           minHeight: "100vh",
@@ -20,9 +19,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       >
         {/* GLOBAL BACKGROUND (homepage look) */}
         <div style={{ position: "fixed", inset: 0, zIndex: -10 }}>
-          {/* deep space base */}
           <div style={{ position: "absolute", inset: 0, background: "#0b0a14" }} />
-          {/* nebula gradients */}
           <div
             style={{
               position: "absolute",
@@ -35,7 +32,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 "radial-gradient(70% 60% at 20% 80%, rgba(46,186,255,0.22), transparent)",
             }}
           />
-          {/* star speckle */}
           <div
             style={{
               position: "absolute",
@@ -45,7 +41,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               backgroundSize: "3px 3px",
             }}
           />
-          {/* vignette */}
           <div
             style={{
               position: "absolute",
@@ -57,7 +52,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           />
         </div>
 
-        {/* app content */}
         <div style={{ position: "relative", zIndex: 10 }}>{children}</div>
       </body>
     </html>
