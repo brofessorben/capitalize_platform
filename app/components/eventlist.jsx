@@ -1,75 +1,92 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { getSupabase } from "@/lib/supabaseClient";
+import { createClient } from "@supabase/supabase-js";
 
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabase = createClient(supabaseUrl, supabaseAnon);
+
+/**
+ * Props:
+ * - role: "referrer" | "vendor" | "host"
+ * - onSelect: (eventId: string) => void
+ */
 export default function EventList({ role = "referrer", onSelect }) {
-  const supabase = getSupabase();
-  const [rows, setRows] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [working, setWorking] = useState(false);
 
+  // load existing events for this user/role
   useEffect(() => {
-    let off = false;
-    const load = async () => {
-      const { data } = await supabase
+    async function run() {
+      // simple: show last 25 events regardless of owner for now
+      // (match to your schema later if you filter by user)
+      const { data, error } = await supabase
         .from("events")
         .select("*")
-        .eq("role", role)
-        .order("updated_at", { ascending: false })
-        .limit(20);
-      if (!off) setRows(data || []);
-    };
-    load();
+        .order("created_at", { ascending: false })
+        .limit(25);
+      if (!error && data) setEvents(data);
+    }
+    run();
+  }, []);
 
-    const ch = supabase
-      .channel(`events-${role}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "events", filter: `role=eq.${role}` },
-        load
-      )
-      .subscribe();
+  async function createNew() {
+    try {
+      setWorking(true);
+      const r = await fetch("/api/events/new", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error || "failed to create event");
 
-    return () => {
-      off = true;
-      supabase.removeChannel(ch);
-    };
-  }, [role, supabase]);
-
-  async function newThread() {
-    const r = await fetch("/api/events", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: "New Thread", role }),
-    });
-    const j = await r.json();
-    onSelect?.(j?.id);
+      const id = j?.event?.id;
+      if (id) {
+        setEvents((e) => [{ ...j.event }, ...e]);
+        onSelect && onSelect(id);
+      } else {
+        throw new Error("No event.id returned from API");
+      }
+    } catch (e) {
+      console.error(e);
+      alert(e?.message || "New Thread failed");
+    } finally {
+      setWorking(false);
+    }
   }
 
   return (
-    <div className="rounded-xl border border-[#203227] bg-[#0b0f0d]">
-      <div className="flex items-center justify-between px-4 py-3">
-        <div className="text-[#cdebd9] font-semibold">Your Threads</div>
+    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 md:p-6">
+      <div className="mb-4 flex items-center justify-between">
+        <h3 className="text-lg font-semibold">Your Threads</h3>
         <button
-          className="rounded-md bg-[#103221] border border-[#1f3b2d] px-3 py-1 text-[#c9fdd7] hover:bg-[#143021]"
-          onClick={newThread}
+          type="button"
+          onClick={createNew}
+          disabled={working}
+          className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-3 py-1.5 text-sm hover:bg-emerald-400/20 disabled:opacity-50"
         >
-          + New Thread
+          {working ? "Creating…" : "+ New Thread"}
         </button>
       </div>
 
-      {rows.length === 0 ? (
-        <div className="px-4 pb-4 text-sm text-slate-400">No threads yet. Make one!</div>
+      {events.length === 0 ? (
+        <div className="rounded-xl border border-white/10 bg-black/30 p-4 text-sm opacity-70">
+          No threads yet. Make one!
+        </div>
       ) : (
-        <ul className="px-2 pb-3 space-y-1">
-          {rows.map((r) => (
-            <li key={r.id}>
-              <button
-                onClick={() => onSelect?.(r.id)}
-                className="w-full text-left rounded-md px-3 py-2 hover:bg-[#0f1a14] border border-transparent hover:border-[#1f3b2d] text-[#d7efe2]"
-                title={r.title}
-              >
-                {r.title}
-              </button>
+        <ul className="divide-y divide-white/5 overflow-hidden rounded-xl border border-white/10 bg-black/30">
+          {events.map((ev) => (
+            <li
+              key={ev.id}
+              className="cursor-pointer px-4 py-3 hover:bg-white/5"
+              onClick={() => onSelect && onSelect(ev.id)}
+            >
+              <div className="text-sm font-medium">Thread {ev.id}</div>
+              <div className="text-xs opacity-60">
+                {new Date(ev.created_at).toLocaleString()}
+              </div>
             </li>
           ))}
         </ul>
