@@ -15,9 +15,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           WebkitFontSmoothing: "antialiased",
           MozOsxFontSmoothing: "grayscale",
           margin: 0,
+          background: "transparent",
         }}
       >
-        {/* GLOBAL BACKGROUND (homepage look) */}
+        {/* Galaxy background */}
         <div style={{ position: "fixed", inset: 0, zIndex: -10 }}>
           <div style={{ position: "absolute", inset: 0, background: "#0b0a14" }} />
           <div
