@@ -1,15 +1,14 @@
-// app/layout.jsx
 import "./globals.css";
 
 export const metadata = {
   title: "CAPITALIZE",
-  description: "Connect. Refer. Get Paid.",
+  description: "Referral-driven marketplace",
 };
 
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body className="min-h-dvh bg-black text-gray-100">
+      <body className="min-h-screen bg-black text-white antialiased">
         {children}
       </body>
     </html>
