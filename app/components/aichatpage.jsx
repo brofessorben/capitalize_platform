@@ -3,18 +3,14 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
-// ---- Supabase (browser) ----
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseAnon);
 
-// Little helper for scrolling after send
 function useAutoScroll(dep) {
   const listRef = useRef(null);
   useEffect(() => {
-    if (listRef.current) {
-      listRef.current.scrollTop = listRef.current.scrollHeight;
-    }
+    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [dep]);
   return listRef;
 }
@@ -29,12 +25,10 @@ export default function AIChatPage({
   const [sending, setSending] = useState(false);
   const [messages, setMessages] = useState([]);
 
-  // adopt parent-selected event id
   useEffect(() => {
     if (initialEventId) setEventId(initialEventId);
   }, [initialEventId]);
 
-  // fetch + realtime subscribe to messages in this event/thread
   useEffect(() => {
     let sub;
     async function run() {
@@ -66,27 +60,39 @@ export default function AIChatPage({
 
   const listRef = useAutoScroll(messages);
 
-  // ---- SEND directly to Supabase (no API route) ----
+  async function insertMessage({ event_id, role, content }) {
+    const { data, error } = await supabase
+      .from("messages")
+      .insert([{ event_id, role, content }])
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  }
+
+  // Tiny placeholder “AI” so chips don’t feel dead
+  async function insertAssistantReply(triggerText) {
+    const reply = `✅ Noted: ${triggerText}\n(Assistant reply placeholder — real AI hook coming next.)`;
+    await insertMessage({ event_id: eventId, role: "assistant", content: reply });
+  }
+
   async function send(text) {
     const clean = (text ?? input ?? "").trim();
     if (!clean || !eventId) return;
-
     try {
       setSending(true);
-      const { error } = await supabase
-        .from("messages")
-        .insert([{ event_id: eventId, role, content: clean }]);
-      if (error) throw error;
+      await insertMessage({ event_id: eventId, role, content: clean });
       setInput("");
+      // If it came from a suggestion chip, drop a placeholder reply
+      await insertAssistantReply(clean);
     } catch (e) {
       console.error("send failed:", e?.message || e);
-      alert("Send failed. Check console for details.");
+      alert("Send failed. Open console for details.");
     } finally {
       setSending(false);
     }
   }
 
-  // premade suggestions call the same send()
   const suggestions = useMemo(
     () => [
       "Draft an intro between vendor + host",
@@ -98,7 +104,6 @@ export default function AIChatPage({
     []
   );
 
-  // ctrl/cmd+enter to send
   function onKeyDown(e) {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
       e.preventDefault();
@@ -115,7 +120,6 @@ export default function AIChatPage({
         </div>
       </div>
 
-      {/* suggestion chips */}
       <div className="mb-3 flex flex-wrap gap-2">
         {suggestions.map((s) => (
           <button
@@ -129,7 +133,6 @@ export default function AIChatPage({
         ))}
       </div>
 
-      {/* messages list */}
       <div
         ref={listRef}
         className="mb-3 h-64 overflow-y-auto rounded-xl border border-white/10 bg-black/30 p-3"
@@ -152,7 +155,6 @@ export default function AIChatPage({
         )}
       </div>
 
-      {/* input */}
       <div className="flex items-start gap-2">
         <textarea
           rows={3}
