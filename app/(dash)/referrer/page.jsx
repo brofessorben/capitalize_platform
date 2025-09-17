@@ -19,7 +19,7 @@ export default function ReferrerPage() {
 
   return (
     <UserGate>
-      <div className="mx-auto max-w-6xl p-4 md:p-6 text-white">
+      <main className="mx-auto max-w-6xl p-4 md:p-6 text-white">
         <AIChatPage
           role="referrer"
           header="Referrer Console"
@@ -28,7 +28,7 @@ export default function ReferrerPage() {
         <div className="mt-8">
           <EventList role="referrer" onSelect={setActiveEvent} />
         </div>
-      </div>
+      </main>
     </UserGate>
   );
 }
