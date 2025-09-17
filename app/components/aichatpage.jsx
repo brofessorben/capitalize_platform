@@ -29,6 +29,7 @@ export default function AIChatPage({
     if (initialEventId) setEventId(initialEventId);
   }, [initialEventId]);
 
+  // Fetch + realtime
   useEffect(() => {
     let sub;
     async function run() {
@@ -41,6 +42,7 @@ export default function AIChatPage({
         .select("*")
         .eq("event_id", eventId)
         .order("created_at", { ascending: true });
+
       if (!error && data) setMessages(data);
 
       sub = supabase
@@ -60,20 +62,24 @@ export default function AIChatPage({
 
   const listRef = useAutoScroll(messages);
 
-  async function insertMessage({ event_id, role, content }) {
-    const { data, error } = await supabase
+  async function insertUserMessage(text) {
+    const { error } = await supabase
       .from("messages")
-      .insert([{ event_id, role, content }])
-      .select()
-      .single();
+      .insert([{ event_id: eventId, role, content: text }]);
     if (error) throw error;
-    return data;
   }
 
-  // Tiny placeholder “AI” so chips don’t feel dead
-  async function insertAssistantReply(triggerText) {
-    const reply = `✅ Noted: ${triggerText}\n(Assistant reply placeholder — real AI hook coming next.)`;
-    await insertMessage({ event_id: eventId, role: "assistant", content: reply });
+  // Call server AI route; assistant will insert message server-side
+  async function triggerAI() {
+    const r = await fetch("/api/ai/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event_id: eventId, role }),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      console.error("AI call failed:", j?.error || r.statusText);
+    }
   }
 
   async function send(text) {
@@ -81,10 +87,9 @@ export default function AIChatPage({
     if (!clean || !eventId) return;
     try {
       setSending(true);
-      await insertMessage({ event_id: eventId, role, content: clean });
+      await insertUserMessage(clean);
       setInput("");
-      // If it came from a suggestion chip, drop a placeholder reply
-      await insertAssistantReply(clean);
+      await triggerAI();
     } catch (e) {
       console.error("send failed:", e?.message || e);
       alert("Send failed. Open console for details.");
