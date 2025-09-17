@@ -1,15 +1,20 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { createClient, SupabaseClient, Session } from "@supabase/supabase-js";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL as string | undefined;
-const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string | undefined;
+const URL = process.env.NEXT_PUBLIC_SUPABASE_URL as string | undefined;
+const ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string | undefined;
 
+// Build client safely
 let supabase: SupabaseClient | null = null;
-if (SUPABASE_URL && SUPABASE_ANON) {
-  supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
-    auth: { persistSession: true, detectSessionInUrl: true, autoRefreshToken: true },
+if (URL && ANON) {
+  supabase = createClient(URL, ANON, {
+    auth: {
+      persistSession: true,
+      detectSessionInUrl: true,
+      autoRefreshToken: true,
+    },
   });
 }
 
@@ -18,53 +23,64 @@ export default function UserGate({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState<boolean>(true);
   const [fatal, setFatal] = useState<string | null>(null);
 
+  const debugMode = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    return new URL(window.location.href).searchParams.get("debug") === "1";
+  }, []);
+
   useEffect(() => {
     let mounted = true;
 
     async function init() {
       try {
         if (!supabase) {
-          setFatal("Missing Supabase env vars (NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY).");
-          setLoading(false);
+          setFatal(
+            "Supabase env missing: NEXT_PUBLIC_SUPABASE_URL and/or NEXT_PUBLIC_SUPABASE_ANON_KEY."
+          );
           return;
         }
 
-        // --- 1) If OAuth returned with ?code=… do the PKCE exchange explicitly (prevents loops) ---
+        // 1) Handle OAuth return explicitly (prevents redirect loops)
         const url = new URL(window.location.href);
-        const hasCode = url.searchParams.get("code");
-        const hasState = url.searchParams.get("state");
-        if (hasCode && hasState) {
-          // Exchange the code for a session
-          const { error } = await supabase.auth.exchangeCodeForSession(window.location.href);
-          if (error) {
-            console.warn("exchangeCodeForSession error:", error.message);
+        const code = url.searchParams.get("code");
+        const state = url.searchParams.get("state");
+        if (code && state) {
+          try {
+            const { error } = await supabase.auth.exchangeCodeForSession(
+              url.toString()
+            );
+            if (debugMode) console.log("[Gate] exchanged code =>", error || "OK");
+          } catch (e: any) {
+            console.warn("[Gate] exchange error:", e?.message || e);
+          } finally {
+            // strip code/state so it won't retrigger
+            url.searchParams.delete("code");
+            url.searchParams.delete("state");
+            window.history.replaceState({}, "", url.toString());
           }
-          // Clean the URL so it doesn't keep re-triggering
-          url.searchParams.delete("code");
-          url.searchParams.delete("state");
-          window.history.replaceState({}, "", url.toString());
         }
 
-        // --- 2) Initial session fetch ---
-        const { data } = await supabase.auth.getSession();
-        if (!mounted) return;
-        setSession(data.session ?? null);
-        setLoading(false);
+        // 2) Read current session
+        const { data, error } = await supabase.auth.getSession();
+        if (debugMode) console.log("[Gate] getSession:", { data, error });
 
-        // --- 3) Listen for auth state changes (covers sign-in/out + refresh) ---
+        if (!mounted) return;
+        setSession(data?.session ?? null);
+
+        // 3) Subscribe to auth changes (token refresh / sign in / out)
         const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
           if (!mounted) return;
+          if (debugMode) console.log("[Gate] onAuthStateChange:", _event, !!sess);
           setSession(sess ?? null);
-          setLoading(false);
         });
 
+        // cleanup
         return () => sub.subscription.unsubscribe();
       } catch (e: any) {
-        console.error("UserGate init error:", e?.message || e);
-        if (mounted) {
-          setFatal("Auth init failed. Open console for details.");
-          setLoading(false);
-        }
+        console.error("[Gate] init fatal:", e?.message || e);
+        if (mounted) setFatal("Auth init failed — see console.");
+      } finally {
+        if (mounted) setLoading(false); // <- NEVER hang
       }
     }
 
@@ -72,9 +88,9 @@ export default function UserGate({ children }: { children: React.ReactNode }) {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [debugMode]);
 
-  // -------------------- UI STATES --------------------
+  // ---------- UI STATES ----------
   if (fatal) {
     return (
       <div className="mx-auto grid min-h-[80vh] max-w-lg place-items-center p-6">
@@ -82,7 +98,7 @@ export default function UserGate({ children }: { children: React.ReactNode }) {
           <h2 className="mb-2 text-xl font-semibold">Configuration error</h2>
           <p className="text-sm opacity-90">{fatal}</p>
           <ul className="mt-3 list-disc pl-5 text-sm opacity-80">
-            <li>Set env vars in Vercel:</li>
+            <li>Set envs in Vercel:</li>
             <li><code>NEXT_PUBLIC_SUPABASE_URL</code></li>
             <li><code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code></li>
           </ul>
@@ -91,44 +107,64 @@ export default function UserGate({ children }: { children: React.ReactNode }) {
     );
   }
 
+  // Small debug strip (only with ?debug=1)
+  const DebugBar = () => {
+    if (!debugMode) return null;
+    const href =
+      typeof window !== "undefined" ? window.location.href : "(ssr)";
+    return (
+      <div className="fixed bottom-2 left-2 z-50 rounded bg-black/70 px-2 py-1 text-[10px] text-white">
+        <div>debug: gate</div>
+        <div>env URL:{String(!!URL)} ANON:{String(!!ANON)}</div>
+        <div>session:{String(!!session)}</div>
+        <div className="max-w-[60vw] truncate">{href}</div>
+      </div>
+    );
+  };
+
   if (loading) {
     return (
-      <div className="grid min-h-[60vh] place-items-center text-sm opacity-70">
-        Loading…
-      </div>
+      <>
+        <div className="grid min-h-[60vh] place-items-center text-sm opacity-70">
+          Loading…
+        </div>
+        <DebugBar />
+      </>
     );
   }
 
-  if (!session) {
-    // Not signed in → show login card
+  if (!supabase || !session) {
+    // Not signed in → login card
     return (
-      <div className="mx-auto grid min-h-[70vh] max-w-md place-items-center p-6">
-        <div className="w-full rounded-2xl border border-white/10 bg-white/5 p-6">
-          <h2 className="mb-2 text-xl font-semibold">Sign in to continue</h2>
-          <p className="mb-4 text-sm opacity-80">
-            Use your Google account to access your threads, events, and messages.
-          </p>
-          <button
-            type="button"
-            onClick={() => {
-              if (!supabase) return;
-              const backTo = `${window.location.origin}${window.location.pathname}`;
-              supabase.auth.signInWithOAuth({
-                provider: "google",
-                options: { redirectTo: backTo }, // come back to the same dashboard
-              });
-            }}
-            className="w-full rounded-xl bg-emerald-500 py-3 font-medium text-black"
-          >
-            Continue with Google
-          </button>
+      <>
+        <div className="mx-auto grid min-h-[70vh] max-w-md place-items-center p-6">
+          <div className="w-full rounded-2xl border border-white/10 bg-white/5 p-6">
+            <h2 className="mb-2 text-xl font-semibold">Sign in to continue</h2>
+            <p className="mb-4 text-sm opacity-80">
+              Use your Google account to access your threads, events, and messages.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                if (!supabase) return;
+                const backTo = `${window.location.origin}${window.location.pathname}`;
+                supabase.auth.signInWithOAuth({
+                  provider: "google",
+                  options: { redirectTo: backTo },
+                });
+              }}
+              className="w-full rounded-xl bg-emerald-500 py-3 font-medium text-black"
+            >
+              Continue with Google
+            </button>
+          </div>
         </div>
-      </div>
+        <DebugBar />
+      </>
     );
   }
 
   const email = session.user?.email || "Signed in";
-
   return (
     <>
       <header className="sticky top-0 z-20 mb-4 border-b border-white/10 bg-black/40 backdrop-blur">
@@ -144,8 +180,7 @@ export default function UserGate({ children }: { children: React.ReactNode }) {
             <button
               type="button"
               onClick={async () => {
-                if (!supabase) return;
-                await supabase.auth.signOut();
+                await supabase!.auth.signOut();
                 window.location.assign("/");
               }}
               className="rounded-lg border border-white/15 px-3 py-1.5 hover:bg-white/10"
@@ -157,6 +192,7 @@ export default function UserGate({ children }: { children: React.ReactNode }) {
       </header>
 
       {children}
+      <DebugBar />
     </>
   );
 }
