@@ -98,11 +98,15 @@ export async function POST(req: Request) {
     console.error("/api/chat threads lookup error:", { event_id, err: threadCheckErr });
     return NextResponse.json({ error: `threads lookup failed: ${threadCheckErr.message}` }, { status: 500 });
   }
+  let createdThread: any = null;
+  let createThreadErr: any = null;
   if (!threadCheck) {
-    const { data: createdThread, error: createThreadErr } = await supabaseAdmin.from("threads").insert([{ id: event_id, user_id: safeUserId, title: text?.slice?.(0, 120) || "Quick thread", role }]).select().single();
+    const ct = await supabaseAdmin.from("threads").insert([{ id: event_id, user_id: safeUserId, title: text?.slice?.(0, 120) || "Quick thread", role }]).select().maybeSingle();
+    createdThread = ct.data ?? null;
+    createThreadErr = ct.error ?? null;
     if (createThreadErr) {
       console.error("/api/chat create thread error:", { event_id, err: createThreadErr, payload });
-      return NextResponse.json({ error: `failed to create thread: ${createThreadErr.message}` }, { status: 500 });
+      return NextResponse.json({ error: `failed to create thread: ${createThreadErr.message}`, debug: { payload, event_id, threadCheck: !!threadCheck, threadCheckErr: threadCheckErr?.message ?? null, createdThread, createThreadErr: createThreadErr?.message ?? null } }, { status: 500 });
     }
   }
 
@@ -114,11 +118,19 @@ export async function POST(req: Request) {
 
   if (error) {
     // Return extra debug info for the client so the alert is actionable during testing.
-    console.error("/api/chat insert message error:", { event_id, err: error, payload, threadCheckErr });
+    console.error("/api/chat insert message error:", { event_id, err: error, payload, threadCheckErr, createdThread, createThreadErr });
     return NextResponse.json(
       {
         error: error.message,
-        debug: { payload, event_id, threadExists: !!threadCheck, threadCheckErr: threadCheckErr?.message ?? null },
+        debug: {
+          payload,
+          event_id,
+          threadExists: !!threadCheck,
+          threadCheckErr: threadCheckErr?.message ?? null,
+          createdThread,
+          createThreadErr: createThreadErr?.message ?? null,
+          insertErr: { message: error.message, details: (error as any)?.details ?? null, code: (error as any)?.code ?? null },
+        },
       },
       { status: 500 }
     );
