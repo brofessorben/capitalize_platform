@@ -62,11 +62,24 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Missing 'text' in request body" }, { status: 400 });
   }
 
+  // Normalize event id: server expects UUID for the event/event thread.
+  const isUuid = (s: any) => typeof s === "string" && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/.test(s);
+
+  // We'll compute event_id early to ensure it's available for any return paths.
+  let event_id: string;
+  try {
+    event_id = isUuid(lead_id) ? lead_id : crypto.randomUUID();
+  } catch {
+    // Fallback if crypto.randomUUID isn't available
+    event_id = isUuid(lead_id) ? lead_id : String(Date.now()) + "-" + Math.random().toString(36).slice(2, 9);
+  }
+
   // 👇 TypeScript-safe: insert an ARRAY and cast payload to any to avoid 'never' inference
   // Allow client-side demo/anonymous posts: accept `user_id` from body if present.
   const payload: any = {
     user_id: body?.user_id ?? null,
-    lead_id,
+    // DB uses `lead_id` column for thread id (UUID). Store generated UUID there.
+    lead_id: event_id,
     text,
     role,
     sender,
@@ -86,17 +99,15 @@ export async function POST(req: Request) {
   // This mirrors the logic in app/api/ai/complete but runs for the single message.
   try {
     if (!OPENAI_API_KEY) {
-      // If no key: return the inserted message without AI reply.
-      return NextResponse.json({ message: data }, { status: 201 });
+      // If no key: return the inserted message (and event id) without AI reply.
+      return NextResponse.json({ message: data, event_id }, { status: 201 });
     }
-
-    const event_id = payload.lead_id;
 
     // Build history from recent messages for context (use admin client)
     const { data: msgs, error: mErr } = await supabaseAdmin
       .from("messages")
       .select("*")
-      .eq("event_id", event_id)
+      .eq("lead_id", event_id)
       .order("created_at", { ascending: true })
       .limit(20);
 
@@ -141,11 +152,11 @@ export async function POST(req: Request) {
     if (aiText) {
       const { error: insErr } = await supabaseAdmin
         .from("messages")
-        .insert([{ event_id: event_id, role: "assistant", content: aiText }]);
+        .insert([{ lead_id: event_id, role: "assistant", content: aiText }]);
       if (insErr) console.warn("AI insert error:", insErr.message);
     }
 
-    return NextResponse.json({ message: data, reply: aiText }, { status: 201 });
+    return NextResponse.json({ message: data, reply: aiText, event_id }, { status: 201 });
   } catch (e: any) {
     console.error("AI generation failed:", e?.message || e);
     return NextResponse.json({ message: data }, { status: 201 });
