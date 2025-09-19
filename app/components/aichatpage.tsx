@@ -95,7 +95,10 @@ export default function AIChatPage({
       .insert([{ event_id: eid, role, content: text }]);
     // If we just created a temp event id, set it so realtime subscription kicks in
     if (!eventId) setEventId(eid);
-    if (error) throw error;
+    if (error) {
+      console.error("insertUserMessage error:", error);
+      throw error;
+    }
   }
 
   // Call server AI route; assistant will insert message server-side
@@ -207,7 +210,7 @@ export default function AIChatPage({
         />
         <button
           type="button"
-          disabled={sending || !eventId || !input.trim()}
+          disabled={sending || !input.trim()}
           onClick={() => void send()}
           className="h-[56px] shrink-0 rounded-xl bg-emerald-500 px-4 font-medium text-black disabled:cursor-not-allowed disabled:opacity-50"
         >
