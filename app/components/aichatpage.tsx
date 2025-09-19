@@ -74,7 +74,26 @@ export default function AIChatPage({
           { event: "INSERT", schema: "public", table: "messages", filter: `event_id=eq.${eventId}` },
           (payload) => {
             const row = payload.new as MessageRow;
-            setMessages((m) => [...m, row]);
+            setMessages((prev) => {
+              // If we already have this id, skip
+              if (prev.some((p) => p.id === row.id)) return prev;
+
+              // If this is an assistant reply and we previously appended a temp assistant
+              // with the same content, remove the temp to avoid duplicates
+              let next = [...prev];
+              if (row.role === "assistant") {
+                for (let i = next.length - 1; i >= 0; i--) {
+                  const m = next[i] as any;
+                  if (String(m.id || "").startsWith("tmp-") && m.role === "assistant" && m.content === (row as any).content) {
+                    next.splice(i, 1);
+                    break;
+                  }
+                }
+              }
+
+              next.push(row);
+              return next;
+            });
           }
         )
         .subscribe();
@@ -96,7 +115,7 @@ export default function AIChatPage({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // Do not send a non-UUID user_id; leave it null so server handles auth/user mapping.
-      body: JSON.stringify({ user_id: null, lead_id: eid, role, text }),
+      body: JSON.stringify({ user_id: null, lead_id: eid, role: "user", sender: role, text }),
     });
     const j = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -107,8 +126,6 @@ export default function AIChatPage({
       throw new Error(j?.error || res.statusText || "Chat insert failed");
     }
     // If server returned an `event_id`, replace the temporary id with the canonical one.
-    // This ensures we subscribe to the DB-backed thread (and avoid UI-generated `ui-` ids
-    // causing FK issues on subsequent requests).
     const returnedEventId = j?.event_id;
     if (returnedEventId) {
       setEventId(returnedEventId);
@@ -118,22 +135,14 @@ export default function AIChatPage({
     }
     // If the server provided debug info, log it for easier triage during testing
     if (j?.debug) console.debug("/api/chat debug:", j.debug);
-  }
 
-  // Call server AI route; assistant will insert message server-side
-  async function triggerAI() {
-    const r = await fetch("/api/ai/complete", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ event_id: eventId, role }),
-    });
-    if (!r.ok) {
-      let msg = r.statusText;
-      try {
-        const j = await r.json();
-        msg = j?.error || msg;
-      } catch {}
-      console.error("AI call failed:", msg);
+    // Also append assistant reply immediately if provided; a realtime insert
+    // will later replace the temp bubble with the persisted one.
+    if (j?.reply) {
+      setMessages((m) => [
+        ...m,
+        { id: `tmp-${Date.now()}`, event_id: returnedEventId || eid, role: "assistant", content: j.reply, created_at: new Date().toISOString() },
+      ]);
     }
   }
 
@@ -144,7 +153,6 @@ export default function AIChatPage({
       setSending(true);
       await insertUserMessage(clean);
       setInput("");
-      await triggerAI();
     } catch (e: any) {
       console.error("send failed:", e?.message || e);
       const msg = e?.message || (typeof e === "string" ? e : "Unknown error");

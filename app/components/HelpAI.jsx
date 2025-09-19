@@ -116,6 +116,7 @@ export default function HelpAI({
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [eventId, setEventId] = useState(null);
 
   // Open + auto-greet
   const openChat = () => {
@@ -166,23 +167,31 @@ export default function HelpAI({
       return;
     }
 
+    // Optimistic user bubble
     setMessages((m) => [...m, { role: "user", content: text }]);
     setInput("");
     setSending(true);
 
     try {
+      const eid = eventId ?? `ui-${userId}-${Date.now()}`;
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_id: userId,
-          lead_id: `ui-${userId}-${Date.now()}`,
+          user_id: null,
+          lead_id: eid,
+          role: "user",
           sender: role || "guide",
           text,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Chat error");
+
+      // Persist canonical thread id
+      if (data?.event_id) setEventId(data.event_id);
+
+      // Render assistant reply immediately
       setMessages((m) => [...m, { role: "assistant", content: data.reply || "(no reply)" }]);
     } catch (err) {
       setMessages((m) => [

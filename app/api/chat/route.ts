@@ -5,7 +5,7 @@ import { getSupabase } from "@/lib/supabaseClient";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
-const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+const MODEL = process.env.OPENAI_MODEL || "gpt-5";
 
 // GET /api/chat?lead_id=<uuid>&limit=100
 export async function GET(req: Request) {
@@ -76,25 +76,16 @@ export async function POST(req: Request) {
 
   const payload: any = {
     user_id: safeUserId,
-    // Always set an `event_id` for the conversation thread. Only set `lead_id` when the
-    // incoming `lead_id` is a valid UUID (so we don't create a foreign-key reference to a
-    // non-existent `leads` row and trigger FK violations).
-  event_id,
-  // If the client provided a real `lead_id` (UUID referring to a row in `leads`),
-  // store that value so the FK constraint points to an existing lead. If it's a
-  // UI temporary id (non-UUID), do not set `lead_id` to avoid FK violations.
-  lead_id: isUuid(lead_id) ? lead_id : null,
-    text,
+    event_id,
+    lead_id: isUuid(lead_id) ? lead_id : null,
+    content: text,
     role,
     sender,
   };
 
-  // Use the service-role admin client for inserts so Row-Level Security doesn't block server-side writes.
-  // Ensure a threads row exists for this event_id so the `messages.event_id` FK is satisfied.
-  // Ensure a threads row exists for this event_id so the `messages.event_id` FK is satisfied.
+  // Ensure threads and events exist
   const { data: threadCheck, error: threadCheckErr } = await supabaseAdmin.from("threads").select("id").eq("id", event_id).maybeSingle();
   if (threadCheckErr && threadCheckErr.code !== "PGRST116") {
-    // Unusual error looking up threads; log and surface it so it isn't swallowed.
     console.error("/api/chat threads lookup error:", { event_id, err: threadCheckErr });
     return NextResponse.json({ error: `threads lookup failed: ${threadCheckErr.message}` }, { status: 500 });
   }
@@ -110,8 +101,7 @@ export async function POST(req: Request) {
     }
   }
 
-  // The DB schema on this project uses an `events` table that `messages.event_id` references.
-  // Ensure a matching `events` row exists (id = event_id) so the FK constraint is satisfied.
+  // Ensure events row exists since messages.event_id -> events.id
   let eventCheck: any = null;
   let eventCheckErr: any = null;
   let createdEvent: any = null;
@@ -123,7 +113,6 @@ export async function POST(req: Request) {
   } catch (e: any) {
     eventCheckErr = e;
   }
-
   if (!eventCheck) {
     const evc = await supabaseAdmin.from('events').insert([{ id: event_id, title: text?.slice?.(0, 120) || 'Quick event', user_id: safeUserId }]).select().maybeSingle();
     createdEvent = evc.data ?? null;
@@ -141,11 +130,9 @@ export async function POST(req: Request) {
     .single();
 
   if (error) {
-    // Return extra debug info for the client so the alert is actionable during testing.
     console.error("/api/chat insert message error:", { event_id, err: error, payload, threadCheckErr, createdThread, createThreadErr });
 
-    // Attempt to read Postgres foreign-key metadata from information_schema so we can
-    // diagnose which FK on `messages` is causing the violation (referenced table/column).
+    // Try to fetch FK metadata for easier diagnosis
     let fkInfo: any = null;
     try {
       const { data: kcus, error: kcuErr } = await supabaseAdmin
@@ -153,11 +140,8 @@ export async function POST(req: Request) {
         .select('*')
         .eq('table_name', 'messages')
         .eq('constraint_schema', 'public');
-
       if (kcuErr) throw kcuErr;
-
       const constraintNames = (kcus || []).map((k: any) => k.constraint_name).filter(Boolean);
-
       let ccus: any[] = [];
       if (constraintNames.length) {
         const { data: ccud, error: ccuErr } = await supabaseAdmin
@@ -167,8 +151,6 @@ export async function POST(req: Request) {
         if (ccuErr) throw ccuErr;
         ccus = ccud || [];
       }
-
-      // Map each constraint to local column(s) and referenced table/column(s)
       fkInfo = (kcus || []).map((k: any) => {
         const ref = ccus.find((c: any) => c.constraint_name === k.constraint_name) || null;
         return {
@@ -180,7 +162,6 @@ export async function POST(req: Request) {
       });
     } catch (schemaErr: any) {
       fkInfo = { error: schemaErr?.message || String(schemaErr) };
-      console.warn('/api/chat: unable to load FK metadata from information_schema', schemaErr?.message || schemaErr);
     }
 
     return NextResponse.json(
@@ -201,27 +182,18 @@ export async function POST(req: Request) {
     );
   }
 
-  // Attempt to generate an AI assistant reply server-side (best-effort).
-  // This mirrors the logic in app/api/ai/complete but runs for the single message.
+  // Generate assistant reply server-side
   try {
     if (!OPENAI_API_KEY) {
-      // If no key: return the inserted message (and event id) without AI reply.
       return NextResponse.json({ message: data, event_id }, { status: 201 });
     }
 
-    // Build history from recent messages for context (use admin client)
-    const { data: msgs, error: mErr } = await supabaseAdmin
+    const { data: msgs } = await supabaseAdmin
       .from("messages")
       .select("*")
       .eq("event_id", event_id)
       .order("created_at", { ascending: true })
       .limit(20);
-
-    if (mErr) {
-      // return user message but log the AI error server-side
-      console.warn("AI: failed to load history:", mErr.message);
-      return NextResponse.json({ message: data }, { status: 201 });
-    }
 
     const history = (msgs || []).map((m: any) => ({
       role: m.role === "assistant" ? "assistant" : "user",
@@ -249,7 +221,7 @@ export async function POST(req: Request) {
     if (!r.ok) {
       const t = await r.text();
       console.warn("OpenAI returned error:", t);
-      return NextResponse.json({ message: data }, { status: 201 });
+      return NextResponse.json({ message: data, event_id }, { status: 201 });
     }
 
     const j = await r.json();
@@ -265,6 +237,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ message: data, reply: aiText, event_id }, { status: 201 });
   } catch (e: any) {
     console.error("AI generation failed:", e?.message || e);
-    return NextResponse.json({ message: data }, { status: 201 });
+    return NextResponse.json({ message: data, event_id }, { status: 201 });
   }
 }
