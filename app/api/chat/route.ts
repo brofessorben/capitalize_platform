@@ -133,7 +133,7 @@ export async function POST(req: Request) {
     const { data: msgs, error: mErr } = await supabaseAdmin
       .from("messages")
       .select("*")
-      .eq("lead_id", event_id)
+      .eq("event_id", event_id)
       .order("created_at", { ascending: true })
       .limit(20);
 
@@ -178,7 +178,7 @@ export async function POST(req: Request) {
     if (aiText) {
       const { error: insErr } = await supabaseAdmin
         .from("messages")
-        .insert([{ lead_id: event_id, role: "assistant", content: aiText }]);
+        .insert([{ event_id, role: "assistant", content: aiText }]);
       if (insErr) console.warn("AI insert error:", insErr.message);
     }
 
