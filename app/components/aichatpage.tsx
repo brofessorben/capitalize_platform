@@ -42,6 +42,7 @@ export default function AIChatPage({
   const [input, setInput] = useState<string>("");
   const [sending, setSending] = useState<boolean>(false);
   const [messages, setMessages] = useState<MessageRow[]>([]);
+  const [lastError, setLastError] = useState<string | null>(null);
 
   // adopt parent-selected event id
   useEffect(() => {
@@ -145,7 +146,8 @@ export default function AIChatPage({
     } catch (e: any) {
       console.error("send failed:", e?.message || e);
       const msg = e?.message || (typeof e === "string" ? e : "Unknown error");
-      alert(`Send failed: ${msg}`);
+      // show detailed error in-page so the user can copy/paste it easily
+      setLastError(`Send failed: ${msg}`);
     } finally {
       setSending(false);
     }
@@ -234,6 +236,20 @@ export default function AIChatPage({
           {sending ? "Sending…" : "Send"}
         </button>
       </div>
+
+      {lastError && (
+        <div className="mt-3 rounded-md border border-red-600 bg-red-900/30 p-3 text-sm text-red-100">
+          <div className="flex justify-between items-start gap-2">
+            <div className="whitespace-pre-wrap">{lastError}</div>
+            <button
+              onClick={() => setLastError(null)}
+              className="ml-2 rounded bg-red-700/60 px-2 py-1 text-xs"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="mt-1 text-xs opacity-50">
         Pro tip: press <kbd>Ctrl/Cmd</kbd> + <kbd>Enter</kbd> to send.
