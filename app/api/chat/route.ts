@@ -110,6 +110,30 @@ export async function POST(req: Request) {
     }
   }
 
+  // The DB schema on this project uses an `events` table that `messages.event_id` references.
+  // Ensure a matching `events` row exists (id = event_id) so the FK constraint is satisfied.
+  let eventCheck: any = null;
+  let eventCheckErr: any = null;
+  let createdEvent: any = null;
+  let createEventErr: any = null;
+  try {
+    const ev = await supabaseAdmin.from('events').select('id').eq('id', event_id).maybeSingle();
+    eventCheck = ev.data ?? null;
+    eventCheckErr = ev.error ?? null;
+  } catch (e: any) {
+    eventCheckErr = e;
+  }
+
+  if (!eventCheck) {
+    const evc = await supabaseAdmin.from('events').insert([{ id: event_id, title: text?.slice?.(0, 120) || 'Quick event', user_id: safeUserId }]).select().maybeSingle();
+    createdEvent = evc.data ?? null;
+    createEventErr = evc.error ?? null;
+    if (createEventErr) {
+      console.error('/api/chat create event error:', { event_id, err: createEventErr, payload });
+      return NextResponse.json({ error: `failed to create event: ${createEventErr.message}`, debug: { payload, event_id, threadExists: !!threadCheck, threadCheckErr: threadCheckErr?.message ?? null, createdThread, createThreadErr: createThreadErr?.message ?? null, eventCheck: !!eventCheck, eventCheckErr: eventCheckErr?.message ?? null, createdEvent, createEventErr: createEventErr?.message ?? null } }, { status: 500 });
+    }
+  }
+
   const { data, error } = await supabaseAdmin
     .from("messages")
     .insert([payload] as any)
@@ -119,6 +143,46 @@ export async function POST(req: Request) {
   if (error) {
     // Return extra debug info for the client so the alert is actionable during testing.
     console.error("/api/chat insert message error:", { event_id, err: error, payload, threadCheckErr, createdThread, createThreadErr });
+
+    // Attempt to read Postgres foreign-key metadata from information_schema so we can
+    // diagnose which FK on `messages` is causing the violation (referenced table/column).
+    let fkInfo: any = null;
+    try {
+      const { data: kcus, error: kcuErr } = await supabaseAdmin
+        .from('information_schema.key_column_usage')
+        .select('*')
+        .eq('table_name', 'messages')
+        .eq('constraint_schema', 'public');
+
+      if (kcuErr) throw kcuErr;
+
+      const constraintNames = (kcus || []).map((k: any) => k.constraint_name).filter(Boolean);
+
+      let ccus: any[] = [];
+      if (constraintNames.length) {
+        const { data: ccud, error: ccuErr } = await supabaseAdmin
+          .from('information_schema.constraint_column_usage')
+          .select('*')
+          .in('constraint_name', constraintNames);
+        if (ccuErr) throw ccuErr;
+        ccus = ccud || [];
+      }
+
+      // Map each constraint to local column(s) and referenced table/column(s)
+      fkInfo = (kcus || []).map((k: any) => {
+        const ref = ccus.find((c: any) => c.constraint_name === k.constraint_name) || null;
+        return {
+          constraint_name: k.constraint_name,
+          local_column: k.column_name,
+          referenced_table: ref?.table_name ?? null,
+          referenced_column: ref?.column_name ?? null,
+        };
+      });
+    } catch (schemaErr: any) {
+      fkInfo = { error: schemaErr?.message || String(schemaErr) };
+      console.warn('/api/chat: unable to load FK metadata from information_schema', schemaErr?.message || schemaErr);
+    }
+
     return NextResponse.json(
       {
         error: error.message,
@@ -130,6 +194,7 @@ export async function POST(req: Request) {
           createdThread,
           createThreadErr: createThreadErr?.message ?? null,
           insertErr: { message: error.message, details: (error as any)?.details ?? null, code: (error as any)?.code ?? null },
+          fkInfo,
         },
       },
       { status: 500 }

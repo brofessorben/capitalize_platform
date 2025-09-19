@@ -106,12 +106,14 @@ export default function AIChatPage({
       alert(`Send failed: ${j?.error || res.statusText}${dbg}`);
       throw new Error(j?.error || res.statusText || "Chat insert failed");
     }
-    // If server returned an `event_id`, replace the temporary id with the canonical one
+    // If server returned an `event_id`, replace the temporary id with the canonical one.
+    // This ensures we subscribe to the DB-backed thread (and avoid UI-generated `ui-` ids
+    // causing FK issues on subsequent requests).
     const returnedEventId = j?.event_id;
     if (returnedEventId) {
-      if (!eventId) setEventId(returnedEventId);
-      // If we used a temp `ui-` id, we want to keep the client subscribed to the real thread.
+      setEventId(returnedEventId);
     } else if (!eventId) {
+      // No server id returned (edge-case); fall back to temporary id so UI can show the message.
       setEventId(eid);
     }
     // If the server provided debug info, log it for easier triage during testing
