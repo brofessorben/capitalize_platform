@@ -1,5 +1,6 @@
 // app/api/chat/route.ts
 import { NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 import { getSupabase } from "@/lib/supabaseClient";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
@@ -66,13 +67,8 @@ export async function POST(req: Request) {
   const isUuid = (s: any) => typeof s === "string" && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/.test(s);
 
   // We'll compute event_id early to ensure it's available for any return paths.
-  let event_id: string;
-  try {
-    event_id = isUuid(lead_id) ? lead_id : crypto.randomUUID();
-  } catch {
-    // Fallback if crypto.randomUUID isn't available
-    event_id = isUuid(lead_id) ? lead_id : String(Date.now()) + "-" + Math.random().toString(36).slice(2, 9);
-  }
+  // Always produce a proper UUID (no non-UUID fallback) so DB UUID FK columns won't reject it.
+  const event_id = isUuid(lead_id) ? lead_id : (typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : randomUUID());
 
   // 👇 TypeScript-safe: insert an ARRAY and cast payload to any to avoid 'never' inference
   // Allow client-side demo/anonymous posts: accept `user_id` from body if present.
@@ -95,14 +91,17 @@ export async function POST(req: Request) {
 
   // Use the service-role admin client for inserts so Row-Level Security doesn't block server-side writes.
   // Ensure a threads row exists for this event_id so the `messages.event_id` FK is satisfied.
-  try {
-    const { data: threadCheck } = await supabaseAdmin.from("threads").select("id").eq("id", event_id).single();
-    if (!threadCheck) {
-      // create a minimal thread record with the desired id
-      await supabaseAdmin.from("threads").insert([{ id: event_id, user_id: safeUserId, title: text?.slice?.(0, 120) || "Quick thread", role }]);
+  // Ensure a threads row exists for this event_id so the `messages.event_id` FK is satisfied.
+  const { data: threadCheck, error: threadCheckErr } = await supabaseAdmin.from("threads").select("id").eq("id", event_id).single();
+  if (threadCheckErr && threadCheckErr.code !== "PGRST116") {
+    // Unusual error looking up threads; surface it so it isn't swallowed.
+    return NextResponse.json({ error: `threads lookup failed: ${threadCheckErr.message}` }, { status: 500 });
+  }
+  if (!threadCheck) {
+    const { data: createdThread, error: createThreadErr } = await supabaseAdmin.from("threads").insert([{ id: event_id, user_id: safeUserId, title: text?.slice?.(0, 120) || "Quick thread", role }]).select().single();
+    if (createThreadErr) {
+      return NextResponse.json({ error: `failed to create thread: ${createThreadErr.message}` }, { status: 500 });
     }
-  } catch (e) {
-    // ignore: if the table doesn't exist or other error, we'll attempt the message insert and surface DB error
   }
 
   const { data, error } = await supabaseAdmin
