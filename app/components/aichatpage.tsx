@@ -90,15 +90,19 @@ export default function AIChatPage({
 
   async function insertUserMessage(text: string) {
     const eid = eventId ?? `ui-${Date.now()}`;
-    const { error } = await supabase
-      .from("messages")
-      .insert([{ event_id: eid, role, content: text }]);
+    // Send message to server API which will insert using supabaseAdmin
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: "web", lead_id: eid, role, text }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      console.error("/api/chat insert error:", j?.error || res.statusText);
+      throw new Error(j?.error || res.statusText || "Chat insert failed");
+    }
     // If we just created a temp event id, set it so realtime subscription kicks in
     if (!eventId) setEventId(eid);
-    if (error) {
-      console.error("insertUserMessage error:", error);
-      throw error;
-    }
   }
 
   // Call server AI route; assistant will insert message server-side
