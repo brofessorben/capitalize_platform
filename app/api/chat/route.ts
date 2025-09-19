@@ -114,7 +114,23 @@ export async function POST(req: Request) {
     eventCheckErr = e;
   }
   if (!eventCheck) {
-    const evc = await supabaseAdmin.from('events').insert([{ id: event_id, title: text?.slice?.(0, 120) || 'Quick event', user_id: safeUserId }]).select().maybeSingle();
+    // Insert with safe columns only (id, title). Some schemas may not have user_id/title.
+    const titleVal = text?.slice?.(0, 120) || 'Quick event';
+    let evc = await supabaseAdmin
+      .from('events')
+      .insert([{ id: event_id, title: titleVal }])
+      .select()
+      .maybeSingle();
+
+    // Fallback: if undefined_column for title, retry with only { id }
+    if (evc.error && (evc.error.code === '42703' || /column\s+"?title"?\s+does not exist/i.test(evc.error.message))) {
+      evc = await supabaseAdmin
+        .from('events')
+        .insert([{ id: event_id }])
+        .select()
+        .maybeSingle();
+    }
+
     createdEvent = evc.data ?? null;
     createEventErr = evc.error ?? null;
     if (createEventErr) {
