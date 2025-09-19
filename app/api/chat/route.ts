@@ -141,52 +141,105 @@ export async function POST(req: Request) {
     .single();
 
   if (error) {
-    console.error("/api/chat insert message error:", { event_id, err: error, payload, threadCheckErr, createdThread, createThreadErr });
+    // If the failure is due to role check constraint, try an alternate mapping once
+    let retried = false;
+    let retryData: any = null;
+    let retryError: any = null;
+    const isRoleCheck = (error as any)?.code === '23514' && /messages_role_check/i.test((error as any)?.message || '');
+    if (isRoleCheck) {
+      try {
+        const ALT_ALLOWED = ["referrer", "vendor", "host", "ai"];
+        const altRole = ALT_ALLOWED.includes(eventRole) ? eventRole : (role === "assistant" ? "ai" : "referrer");
+        const altPayload = { ...payload, role: altRole };
+        const r = await supabaseAdmin.from("messages").insert([altPayload] as any).select().single();
+        retried = true;
+        retryData = r.data;
+        retryError = r.error;
+        if (!r.error) {
+          // Success on retry; proceed to AI reply using the same flow
+          // Generate assistant reply server-side (best-effort)
+          try {
+            if (!OPENAI_API_KEY) {
+              return NextResponse.json({ message: retryData, event_id }, { status: 201 });
+            }
+            const { data: msgs } = await supabaseAdmin
+              .from("messages")
+              .select("*")
+              .eq("event_id", event_id)
+              .order("created_at", { ascending: true })
+              .limit(20);
+            const history = (msgs || []).map((m: any) => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content || "" }));
+            const system = `You are CAPITALIZE Assistant. Be helpful and concise.`;
+            const payloadOpenAI = { model: MODEL, messages: [{ role: "system", content: system }, ...history], temperature: 0.4, max_tokens: 500 };
+            const rr = await fetch("https://api.openai.com/v1/chat/completions", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${OPENAI_API_KEY}` }, body: JSON.stringify(payloadOpenAI) });
+            let aiText = "";
+            if (rr.ok) {
+              const j = await rr.json();
+              aiText = j?.choices?.[0]?.message?.content?.trim() || "";
+              if (aiText) {
+                await supabaseAdmin.from("messages").insert([{ event_id, role: "assistant", content: aiText }]);
+              }
+            }
+            return NextResponse.json({ message: retryData, reply: aiText, event_id }, { status: 201 });
+          } catch (e: any) {
+            return NextResponse.json({ message: retryData, event_id }, { status: 201 });
+          }
+        }
+      } catch {}
+    }
 
-    // Try to fetch FK metadata for easier diagnosis
+    // Return extra debug info for the client so the alert is actionable during testing.
+    // Also include CHECK constraints definition for `messages` to show allowed roles.
     let fkInfo: any = null;
+    let checkInfo: any = null;
     try {
       const { data: kcus, error: kcuErr } = await supabaseAdmin
         .from('information_schema.key_column_usage')
         .select('*')
         .eq('table_name', 'messages')
         .eq('constraint_schema', 'public');
-      if (kcuErr) throw kcuErr;
-      const constraintNames = (kcus || []).map((k: any) => k.constraint_name).filter(Boolean);
-      let ccus: any[] = [];
-      if (constraintNames.length) {
-        const { data: ccud, error: ccuErr } = await supabaseAdmin
-          .from('information_schema.constraint_column_usage')
-          .select('*')
-          .in('constraint_name', constraintNames);
-        if (ccuErr) throw ccuErr;
-        ccus = ccud || [];
+      if (!kcuErr) {
+        const constraintNames = (kcus || []).map((k: any) => k.constraint_name).filter(Boolean);
+        let ccus: any[] = [];
+        if (constraintNames.length) {
+          const { data: ccud } = await supabaseAdmin
+            .from('information_schema.constraint_column_usage')
+            .select('*')
+            .in('constraint_name', constraintNames);
+          ccus = ccud || [];
+        }
+        fkInfo = (kcus || []).map((k: any) => {
+          const ref = ccus.find((c: any) => c.constraint_name === k.constraint_name) || null;
+          return { constraint_name: k.constraint_name, local_column: k.column_name, referenced_table: ref?.table_name ?? null, referenced_column: ref?.column_name ?? null };
+        });
       }
-      fkInfo = (kcus || []).map((k: any) => {
-        const ref = ccus.find((c: any) => c.constraint_name === k.constraint_name) || null;
-        return {
-          constraint_name: k.constraint_name,
-          local_column: k.column_name,
-          referenced_table: ref?.table_name ?? null,
-          referenced_column: ref?.column_name ?? null,
-        };
-      });
-    } catch (schemaErr: any) {
-      fkInfo = { error: schemaErr?.message || String(schemaErr) };
-    }
+      const { data: tcs } = await supabaseAdmin
+        .from('information_schema.table_constraints')
+        .select('constraint_name, constraint_type')
+        .eq('table_name', 'messages')
+        .eq('constraint_type', 'CHECK');
+      const checkNames = (tcs || []).map((t: any) => t.constraint_name);
+      if (checkNames.length) {
+        const { data: ccs } = await supabaseAdmin
+          .from('information_schema.check_constraints')
+          .select('constraint_name, check_clause')
+          .in('constraint_name', checkNames);
+        checkInfo = ccs || [];
+      }
+    } catch {}
 
+    console.error("/api/chat insert message error:", { event_id, err: error, payload });
     return NextResponse.json(
       {
         error: error.message,
         debug: {
           payload,
           event_id,
-          threadExists: !!threadCheck,
-          threadCheckErr: threadCheckErr?.message ?? null,
-          createdThread,
-          createThreadErr: createThreadErr?.message ?? null,
           insertErr: { message: error.message, details: (error as any)?.details ?? null, code: (error as any)?.code ?? null },
+          retried,
+          retryErr: retryError ? { message: retryError.message, code: retryError.code } : null,
           fkInfo,
+          checkInfo,
         },
       },
       { status: 500 }
