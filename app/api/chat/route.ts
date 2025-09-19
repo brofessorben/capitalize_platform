@@ -94,12 +94,14 @@ export async function POST(req: Request) {
   // Ensure a threads row exists for this event_id so the `messages.event_id` FK is satisfied.
   const { data: threadCheck, error: threadCheckErr } = await supabaseAdmin.from("threads").select("id").eq("id", event_id).single();
   if (threadCheckErr && threadCheckErr.code !== "PGRST116") {
-    // Unusual error looking up threads; surface it so it isn't swallowed.
+    // Unusual error looking up threads; log and surface it so it isn't swallowed.
+    console.error("/api/chat threads lookup error:", { event_id, err: threadCheckErr });
     return NextResponse.json({ error: `threads lookup failed: ${threadCheckErr.message}` }, { status: 500 });
   }
   if (!threadCheck) {
     const { data: createdThread, error: createThreadErr } = await supabaseAdmin.from("threads").insert([{ id: event_id, user_id: safeUserId, title: text?.slice?.(0, 120) || "Quick thread", role }]).select().single();
     if (createThreadErr) {
+      console.error("/api/chat create thread error:", { event_id, err: createThreadErr, payload });
       return NextResponse.json({ error: `failed to create thread: ${createThreadErr.message}` }, { status: 500 });
     }
   }
@@ -112,6 +114,7 @@ export async function POST(req: Request) {
 
   if (error) {
     // Return extra debug info for the client so the alert is actionable during testing.
+    console.error("/api/chat insert message error:", { event_id, err: error, payload, threadCheckErr });
     return NextResponse.json(
       {
         error: error.message,
