@@ -80,8 +80,11 @@ export async function POST(req: Request) {
 
   const payload: any = {
     user_id: safeUserId,
-    // DB uses `lead_id` column for thread id (UUID). Store generated UUID there.
-    lead_id: event_id,
+    // Always set an `event_id` for the conversation thread. Only set `lead_id` when the
+    // incoming `lead_id` is a valid UUID (so we don't create a foreign-key reference to a
+    // non-existent `leads` row and trigger FK violations).
+    event_id,
+    lead_id: isUuid(lead_id) ? event_id : null,
     text,
     role,
     sender,

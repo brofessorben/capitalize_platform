@@ -77,7 +77,7 @@ export async function POST(req: Request) {
     // Insert assistant message
     const { error: insErr } = await supabaseAdmin
       .from("messages")
-      .insert([{ lead_id: event_id, role: "assistant", content: aiText }]);
+      .insert([{ event_id, role: "assistant", content: aiText }]);
 
     if (insErr) {
       return NextResponse.json({ error: insErr.message }, { status: 500 });
