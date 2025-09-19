@@ -187,11 +187,7 @@ export default function HelpAI({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Chat error");
-
-      // Persist canonical thread id
       if (data?.event_id) setEventId(data.event_id);
-
-      // Render assistant reply immediately
       setMessages((m) => [...m, { role: "assistant", content: data.reply || "(no reply)" }]);
     } catch (err) {
       setMessages((m) => [

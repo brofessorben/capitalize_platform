@@ -58,6 +58,8 @@ export async function POST(req: Request) {
   const lead_id = body?.lead_id ?? null;
   const role = body?.role ?? "user";
   const sender = body?.sender ?? role;
+  // Event/thread role should reflect the UI actor (sender), not the message chat role
+  const eventRole = typeof sender === "string" && sender ? sender : (typeof role === "string" ? role : "guide");
 
   if (!text) {
     return NextResponse.json({ error: "Missing 'text' in request body" }, { status: 400 });
@@ -92,7 +94,7 @@ export async function POST(req: Request) {
   let createdThread: any = null;
   let createThreadErr: any = null;
   if (!threadCheck) {
-    const ct = await supabaseAdmin.from("threads").insert([{ id: event_id, user_id: safeUserId, title: text?.slice?.(0, 120) || "Quick thread", role }]).select().maybeSingle();
+    const ct = await supabaseAdmin.from("threads").insert([{ id: event_id, user_id: safeUserId, title: text?.slice?.(0, 120) || "Quick thread", role: eventRole }]).select().maybeSingle();
     createdThread = ct.data ?? null;
     createThreadErr = ct.error ?? null;
     if (createThreadErr) {
@@ -114,22 +116,13 @@ export async function POST(req: Request) {
     eventCheckErr = e;
   }
   if (!eventCheck) {
-    // Insert with safe columns only (id, title). Some schemas may not have user_id/title.
+    // Schema requires events.title (text NOT NULL) and events.role (text NOT NULL)
     const titleVal = text?.slice?.(0, 120) || 'Quick event';
-    let evc = await supabaseAdmin
+    const evc = await supabaseAdmin
       .from('events')
-      .insert([{ id: event_id, title: titleVal }])
+      .insert([{ id: event_id, title: titleVal, role: eventRole }])
       .select()
       .maybeSingle();
-
-    // Fallback: if undefined_column for title, retry with only { id }
-    if (evc.error && (evc.error.code === '42703' || /column\s+"?title"?\s+does not exist/i.test(evc.error.message))) {
-      evc = await supabaseAdmin
-        .from('events')
-        .insert([{ id: event_id }])
-        .select()
-        .maybeSingle();
-    }
 
     createdEvent = evc.data ?? null;
     createEventErr = evc.error ?? null;
