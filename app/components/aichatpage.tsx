@@ -89,9 +89,12 @@ export default function AIChatPage({
   const listRef = useAutoScroll(messages);
 
   async function insertUserMessage(text: string) {
+    const eid = eventId ?? `ui-${Date.now()}`;
     const { error } = await supabase
       .from("messages")
-      .insert([{ event_id: eventId, role, content: text }]);
+      .insert([{ event_id: eid, role, content: text }]);
+    // If we just created a temp event id, set it so realtime subscription kicks in
+    if (!eventId) setEventId(eid);
     if (error) throw error;
   }
 
@@ -114,7 +117,7 @@ export default function AIChatPage({
 
   async function send(text?: string) {
     const clean = (text ?? input ?? "").trim();
-    if (!clean || !eventId) return;
+    if (!clean) return;
     try {
       setSending(true);
       await insertUserMessage(clean);
