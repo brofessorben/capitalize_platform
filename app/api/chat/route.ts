@@ -87,7 +87,8 @@ export async function POST(req: Request) {
     sender,
   };
 
-  const { data, error } = await supabase
+  // Use the service-role admin client for inserts so Row-Level Security doesn't block server-side writes.
+  const { data, error } = await supabaseAdmin
     .from("messages")
     .insert([payload] as any)
     .select()
