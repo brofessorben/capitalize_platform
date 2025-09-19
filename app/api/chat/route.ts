@@ -83,8 +83,11 @@ export async function POST(req: Request) {
     // Always set an `event_id` for the conversation thread. Only set `lead_id` when the
     // incoming `lead_id` is a valid UUID (so we don't create a foreign-key reference to a
     // non-existent `leads` row and trigger FK violations).
-    event_id,
-    lead_id: isUuid(lead_id) ? event_id : null,
+  event_id,
+  // If the client provided a real `lead_id` (UUID referring to a row in `leads`),
+  // store that value so the FK constraint points to an existing lead. If it's a
+  // UI temporary id (non-UUID), do not set `lead_id` to avoid FK violations.
+  lead_id: isUuid(lead_id) ? lead_id : null,
     text,
     role,
     sender,
