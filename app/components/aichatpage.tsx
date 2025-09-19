@@ -99,7 +99,10 @@ export default function AIChatPage({
     });
     const j = await res.json().catch(() => ({}));
     if (!res.ok) {
-      console.error("/api/chat insert error:", j?.error || res.statusText);
+      console.error("/api/chat insert error:", j?.error || res.statusText, j?.debug);
+      // Surface server-provided debug info in the UI so you can paste it here.
+      const dbg = j?.debug ? `\n\nDebug: ${JSON.stringify(j.debug)}` : "";
+      alert(`Send failed: ${j?.error || res.statusText}${dbg}`);
       throw new Error(j?.error || res.statusText || "Chat insert failed");
     }
     // If server returned an `event_id`, replace the temporary id with the canonical one
