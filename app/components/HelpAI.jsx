@@ -131,10 +131,14 @@ export default function HelpAI({
     const q = m[1]; // free-form
     setMessages((msgs) => [...msgs, { role: "assistant", content: `Searching vendors: ${q} …` }]);
     try {
-      const res = await fetch(`/api/vendors?query=${encodeURIComponent(q)}`);
+      const res = await fetch(`/api/vendors`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: q }),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Vendor search failed");
-      const lines = (data.results || []).slice(0, 6).map((v, i) => {
+      const lines = (data.items || []).slice(0, 6).map((v, i) => {
         const contact = [v.phone, v.website].filter(Boolean).join(" • ");
         return `${i + 1}. ${v.name}${v.rating ? ` (${v.rating}★)` : ""}\n   ${v.address}${contact ? `\n   ${contact}` : ""}`;
       });
@@ -171,6 +175,7 @@ export default function HelpAI({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          user_id: userId,
           lead_id: `ui-${userId}-${Date.now()}`,
           sender: role || "guide",
           text,

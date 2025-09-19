@@ -1,6 +1,10 @@
 // app/api/chat/route.ts
 import { NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabaseClient";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
+
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
+const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
 // GET /api/chat?lead_id=<uuid>&limit=100
 export async function GET(req: Request) {
@@ -42,15 +46,6 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const supabase = getSupabase();
 
-  const {
-    data: { user },
-    error: userErr,
-  } = await supabase.auth.getUser();
-
-  if (userErr || !user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  }
-
   let body: any = {};
   try {
     body = await req.json();
@@ -68,8 +63,9 @@ export async function POST(req: Request) {
   }
 
   // 👇 TypeScript-safe: insert an ARRAY and cast payload to any to avoid 'never' inference
+  // Allow client-side demo/anonymous posts: accept `user_id` from body if present.
   const payload: any = {
-    user_id: user.id,
+    user_id: body?.user_id ?? null,
     lead_id,
     text,
     role,
@@ -86,5 +82,72 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ message: data }, { status: 201 });
+  // Attempt to generate an AI assistant reply server-side (best-effort).
+  // This mirrors the logic in app/api/ai/complete but runs for the single message.
+  try {
+    if (!OPENAI_API_KEY) {
+      // If no key: return the inserted message without AI reply.
+      return NextResponse.json({ message: data }, { status: 201 });
+    }
+
+    const event_id = payload.lead_id;
+
+    // Build history from recent messages for context (use admin client)
+    const { data: msgs, error: mErr } = await supabaseAdmin
+      .from("messages")
+      .select("*")
+      .eq("event_id", event_id)
+      .order("created_at", { ascending: true })
+      .limit(20);
+
+    if (mErr) {
+      // return user message but log the AI error server-side
+      console.warn("AI: failed to load history:", mErr.message);
+      return NextResponse.json({ message: data }, { status: 201 });
+    }
+
+    const history = (msgs || []).map((m: any) => ({
+      role: m.role === "assistant" ? "assistant" : "user",
+      content: m.content || "",
+    }));
+
+    const system = `You are CAPITALIZE Assistant. Be helpful and concise.`;
+
+    const payloadOpenAI = {
+      model: MODEL,
+      messages: [{ role: "system", content: system }, ...history],
+      temperature: 0.4,
+      max_tokens: 500,
+    };
+
+    const r = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify(payloadOpenAI),
+    });
+
+    if (!r.ok) {
+      const t = await r.text();
+      console.warn("OpenAI returned error:", t);
+      return NextResponse.json({ message: data }, { status: 201 });
+    }
+
+    const j = await r.json();
+    const aiText = j?.choices?.[0]?.message?.content?.trim() || "";
+
+    if (aiText) {
+      const { error: insErr } = await supabaseAdmin
+        .from("messages")
+        .insert([{ event_id: event_id, role: "assistant", content: aiText }]);
+      if (insErr) console.warn("AI insert error:", insErr.message);
+    }
+
+    return NextResponse.json({ message: data, reply: aiText }, { status: 201 });
+  } catch (e: any) {
+    console.error("AI generation failed:", e?.message || e);
+    return NextResponse.json({ message: data }, { status: 201 });
+  }
 }
