@@ -13,6 +13,7 @@ export default function ChatForLead({ params }) {
       <AIChatPage
         role="referrer"
         header={`Chat · Lead ${lead_id}`}
+        initialEventId={lead_id}
       />
     </div>
   );
