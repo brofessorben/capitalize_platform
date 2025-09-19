@@ -76,8 +76,10 @@ export async function POST(req: Request) {
 
   // 👇 TypeScript-safe: insert an ARRAY and cast payload to any to avoid 'never' inference
   // Allow client-side demo/anonymous posts: accept `user_id` from body if present.
+  const safeUserId = isUuid(body?.user_id) ? body.user_id : null;
+
   const payload: any = {
-    user_id: body?.user_id ?? null,
+    user_id: safeUserId,
     // DB uses `lead_id` column for thread id (UUID). Store generated UUID there.
     lead_id: event_id,
     text,

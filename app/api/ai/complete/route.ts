@@ -24,7 +24,7 @@ export async function POST(req: Request) {
     }
 
     const body = (await req.json()) as { event_id?: string; role?: string };
-    const event_id = body?.event_id;
+  const event_id = body?.event_id;
     const role = body?.role || "referrer";
 
     if (!event_id) {
@@ -35,7 +35,7 @@ export async function POST(req: Request) {
     const { data: msgs, error: mErr } = await supabaseAdmin
       .from("messages")
       .select("*")
-      .eq("event_id", event_id)
+      .eq("lead_id", event_id)
       .order("created_at", { ascending: true })
       .limit(20);
 
@@ -77,7 +77,7 @@ export async function POST(req: Request) {
     // Insert assistant message
     const { error: insErr } = await supabaseAdmin
       .from("messages")
-      .insert([{ event_id, role: "assistant", content: aiText }]);
+      .insert([{ lead_id: event_id, role: "assistant", content: aiText }]);
 
     if (insErr) {
       return NextResponse.json({ error: insErr.message }, { status: 500 });
