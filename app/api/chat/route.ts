@@ -92,7 +92,7 @@ export async function POST(req: Request) {
   // Use the service-role admin client for inserts so Row-Level Security doesn't block server-side writes.
   // Ensure a threads row exists for this event_id so the `messages.event_id` FK is satisfied.
   // Ensure a threads row exists for this event_id so the `messages.event_id` FK is satisfied.
-  const { data: threadCheck, error: threadCheckErr } = await supabaseAdmin.from("threads").select("id").eq("id", event_id).single();
+  const { data: threadCheck, error: threadCheckErr } = await supabaseAdmin.from("threads").select("id").eq("id", event_id).maybeSingle();
   if (threadCheckErr && threadCheckErr.code !== "PGRST116") {
     // Unusual error looking up threads; log and surface it so it isn't swallowed.
     console.error("/api/chat threads lookup error:", { event_id, err: threadCheckErr });

@@ -77,11 +77,13 @@ export async function POST(req: Request) {
     // Insert assistant message
     // Ensure the thread exists for this event_id
     try {
-      const { data: threadCheck } = await supabaseAdmin.from("threads").select("id").eq("id", event_id).single();
+      const { data: threadCheck } = await supabaseAdmin.from("threads").select("id").eq("id", event_id).maybeSingle();
       if (!threadCheck) {
         await supabaseAdmin.from("threads").insert([{ id: event_id, user_id: null, title: "AI thread" }]);
       }
-    } catch {}
+    } catch (e) {
+      console.error("ai/complete threads check error:", e?.message || e);
+    }
 
     const { error: insErr } = await supabaseAdmin
       .from("messages")
