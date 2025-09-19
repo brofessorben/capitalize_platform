@@ -56,7 +56,9 @@ export async function POST(req: Request) {
 
   const text = typeof body?.text === "string" ? body.text.trim() : "";
   const lead_id = body?.lead_id ?? null;
-  const role = body?.role ?? "user";
+  const rawRole = typeof body?.role === "string" ? body.role : null;
+  const ALLOWED_MSG_ROLES = ["user", "assistant", "system"];
+  const role = ALLOWED_MSG_ROLES.includes(rawRole || "") ? (rawRole as string) : "user";
   const sender = body?.sender ?? role;
   // Event/thread role should reflect the UI actor (sender), not the message chat role
   const eventRole = typeof sender === "string" && sender ? sender : (typeof role === "string" ? role : "guide");
