@@ -102,8 +102,16 @@ export default function AIChatPage({
       console.error("/api/chat insert error:", j?.error || res.statusText);
       throw new Error(j?.error || res.statusText || "Chat insert failed");
     }
-    // If we just created a temp event id, set it so realtime subscription kicks in
-    if (!eventId) setEventId(eid);
+    // If server returned an `event_id`, replace the temporary id with the canonical one
+    const returnedEventId = j?.event_id;
+    if (returnedEventId) {
+      if (!eventId) setEventId(returnedEventId);
+      // If we used a temp `ui-` id, we want to keep the client subscribed to the real thread.
+    } else if (!eventId) {
+      setEventId(eid);
+    }
+    // If the server provided debug info, log it for easier triage during testing
+    if (j?.debug) console.debug("/api/chat debug:", j.debug);
   }
 
   // Call server AI route; assistant will insert message server-side

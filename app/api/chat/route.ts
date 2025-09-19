@@ -111,7 +111,14 @@ export async function POST(req: Request) {
     .single();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    // Return extra debug info for the client so the alert is actionable during testing.
+    return NextResponse.json(
+      {
+        error: error.message,
+        debug: { payload, event_id, threadExists: !!threadCheck, threadCheckErr: threadCheckErr?.message ?? null },
+      },
+      { status: 500 }
+    );
   }
 
   // Attempt to generate an AI assistant reply server-side (best-effort).
