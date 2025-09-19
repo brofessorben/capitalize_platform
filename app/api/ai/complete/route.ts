@@ -75,6 +75,14 @@ export async function POST(req: Request) {
     const aiText = j?.choices?.[0]?.message?.content?.trim() || "…";
 
     // Insert assistant message
+    // Ensure the thread exists for this event_id
+    try {
+      const { data: threadCheck } = await supabaseAdmin.from("threads").select("id").eq("id", event_id).single();
+      if (!threadCheck) {
+        await supabaseAdmin.from("threads").insert([{ id: event_id, user_id: null, title: "AI thread" }]);
+      }
+    } catch {}
+
     const { error: insErr } = await supabaseAdmin
       .from("messages")
       .insert([{ event_id, role: "assistant", content: aiText }]);

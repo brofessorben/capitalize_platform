@@ -94,6 +94,17 @@ export async function POST(req: Request) {
   };
 
   // Use the service-role admin client for inserts so Row-Level Security doesn't block server-side writes.
+  // Ensure a threads row exists for this event_id so the `messages.event_id` FK is satisfied.
+  try {
+    const { data: threadCheck } = await supabaseAdmin.from("threads").select("id").eq("id", event_id).single();
+    if (!threadCheck) {
+      // create a minimal thread record with the desired id
+      await supabaseAdmin.from("threads").insert([{ id: event_id, user_id: safeUserId, title: text?.slice?.(0, 120) || "Quick thread", role }]);
+    }
+  } catch (e) {
+    // ignore: if the table doesn't exist or other error, we'll attempt the message insert and surface DB error
+  }
+
   const { data, error } = await supabaseAdmin
     .from("messages")
     .insert([payload] as any)
