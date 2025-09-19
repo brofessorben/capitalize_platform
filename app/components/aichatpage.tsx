@@ -132,7 +132,8 @@ export default function AIChatPage({
       await triggerAI();
     } catch (e: any) {
       console.error("send failed:", e?.message || e);
-      alert("Send failed. Open console for details.");
+      const msg = e?.message || (typeof e === "string" ? e : "Unknown error");
+      alert(`Send failed: ${msg}`);
     } finally {
       setSending(false);
     }
