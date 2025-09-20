@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
-const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+const MODEL = process.env.OPENAI_MODEL || "gpt-5";
 
 interface Message {
   role: string;
@@ -24,7 +24,7 @@ export async function POST(req: Request) {
     }
 
     const body = (await req.json()) as { event_id?: string; role?: string };
-  const event_id = body?.event_id;
+    const event_id = body?.event_id;
     const role = body?.role || "referrer";
 
     if (!event_id) {
@@ -35,7 +35,7 @@ export async function POST(req: Request) {
     const { data: msgs, error: mErr } = await supabaseAdmin
       .from("messages")
       .select("*")
-      .eq("lead_id", event_id)
+      .eq("event_id", event_id)
       .order("created_at", { ascending: true })
       .limit(20);
 
@@ -74,20 +74,19 @@ export async function POST(req: Request) {
     const j = await r.json();
     const aiText = j?.choices?.[0]?.message?.content?.trim() || "…";
 
-    // Insert assistant message
-    // Ensure the thread exists for this event_id
+    // Ensure thread exists (best-effort)
     try {
       const { data: threadCheck } = await supabaseAdmin.from("threads").select("id").eq("id", event_id).maybeSingle();
       if (!threadCheck) {
         await supabaseAdmin.from("threads").insert([{ id: event_id, user_id: null, title: "AI thread" }]);
       }
     } catch (e) {
-      console.error("ai/complete threads check error:", e?.message || e);
+      console.error("ai/complete threads check error:", (e as any)?.message || e);
     }
 
     const { error: insErr } = await supabaseAdmin
       .from("messages")
-      .insert([{ event_id, role: "assistant", content: aiText }]);
+      .insert([{ event_id, role: "assistant", content: aiText, text: aiText }]);
 
     if (insErr) {
       return NextResponse.json({ error: insErr.message }, { status: 500 });

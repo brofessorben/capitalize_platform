@@ -151,12 +151,28 @@ export default function AIChatPage({
     if (!clean) return;
     try {
       setSending(true);
+      // Optimistic user bubble
+      const optimisticId = `tmp-user-${Date.now()}`;
+      setMessages((m) => [
+        ...m,
+        { id: optimisticId, event_id: eventId || "", role: "user", content: clean, created_at: new Date().toISOString() },
+      ]);
       await insertUserMessage(clean);
       setInput("");
+      // After send, fetch full thread via admin-backed GET endpoint to ensure UI shows the persisted rows
+      const eid = (eventId as string) || "";
+      if (eid) {
+        const r = await fetch(`/api/chat?event_id=${encodeURIComponent(eid)}&limit=100`);
+        if (r.ok) {
+          const j = await r.json();
+          if (Array.isArray(j?.messages)) {
+            setMessages(j.messages as any);
+          }
+        }
+      }
     } catch (e: any) {
       console.error("send failed:", e?.message || e);
       const msg = e?.message || (typeof e === "string" ? e : "Unknown error");
-      // show detailed error in-page so the user can copy/paste it easily
       setLastError(`Send failed: ${msg}`);
     } finally {
       setSending(false);

@@ -11,6 +11,23 @@ const MODEL = process.env.OPENAI_MODEL || "gpt-5";
 export async function GET(req: Request) {
   const supabase = getSupabase();
 
+  const { searchParams } = new URL(req.url);
+  const event_id = searchParams.get("event_id");
+  const lead_id = searchParams.get("lead_id");
+  const limit = Number(searchParams.get("limit") ?? 100);
+
+  // If event_id is provided, return messages for that thread using admin client (avoids RLS mismatches)
+  if (event_id) {
+    const { data, error } = await supabaseAdmin
+      .from("messages")
+      .select("*")
+      .eq("event_id", event_id)
+      .order("created_at", { ascending: true })
+      .limit(limit);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ messages: data ?? [] });
+  }
+
   const {
     data: { user },
     error: userErr,
@@ -19,10 +36,6 @@ export async function GET(req: Request) {
   if (userErr || !user) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
-
-  const { searchParams } = new URL(req.url);
-  const lead_id = searchParams.get("lead_id");
-  const limit = Number(searchParams.get("limit") ?? 100);
 
   let query = supabase
     .from("messages")
@@ -50,9 +63,7 @@ export async function POST(req: Request) {
   let body: any = {};
   try {
     body = await req.json();
-  } catch {
-    // ignore
-  }
+  } catch {}
 
   const text = typeof body?.text === "string" ? body.text.trim() : "";
   const lead_id = body?.lead_id ?? null;
@@ -60,29 +71,32 @@ export async function POST(req: Request) {
   const ALLOWED_MSG_ROLES = ["user", "assistant", "system"];
   const role = ALLOWED_MSG_ROLES.includes(rawRole || "") ? (rawRole as string) : "user";
   const sender = body?.sender ?? role;
-  // Event/thread role should reflect the UI actor (sender), not the message chat role
   const eventRole = typeof sender === "string" && sender ? sender : (typeof role === "string" ? role : "guide");
 
   if (!text) {
     return NextResponse.json({ error: "Missing 'text' in request body" }, { status: 400 });
   }
 
-  // Normalize event id: server expects UUID for the event/event thread.
   const isUuid = (s: any) => typeof s === "string" && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/.test(s);
-
-  // We'll compute event_id early to ensure it's available for any return paths.
-  // Always produce a proper UUID (no non-UUID fallback) so DB UUID FK columns won't reject it.
   const event_id = isUuid(lead_id) ? lead_id : (typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : randomUUID());
 
-  // 👇 TypeScript-safe: insert an ARRAY and cast payload to any to avoid 'never' inference
-  // Allow client-side demo/anonymous posts: accept `user_id` from body if present.
-  const safeUserId = isUuid(body?.user_id) ? body.user_id : null;
+  // Prefer authenticated user id from session if present
+  let sessionUserId: string | null = null;
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    sessionUserId = isUuid(user?.id) ? user!.id : null;
+  } catch {}
+  const safeUserIdBody = isUuid(body?.user_id) ? body.user_id : null;
+  const rowUserId = sessionUserId || safeUserIdBody || null;
 
   const payload: any = {
-    user_id: safeUserId,
+    user_id: rowUserId,
     event_id,
     lead_id: isUuid(lead_id) ? lead_id : null,
     content: text,
+    text, // back-compat for existing code reading messages.text
     role,
     sender,
   };
@@ -96,7 +110,7 @@ export async function POST(req: Request) {
   let createdThread: any = null;
   let createThreadErr: any = null;
   if (!threadCheck) {
-    const ct = await supabaseAdmin.from("threads").insert([{ id: event_id, user_id: safeUserId, title: text?.slice?.(0, 120) || "Quick thread", role: eventRole }]).select().maybeSingle();
+    const ct = await supabaseAdmin.from("threads").insert([{ id: event_id, user_id: rowUserId, title: text?.slice?.(0, 120) || "Quick thread", role: eventRole }]).select().maybeSingle();
     createdThread = ct.data ?? null;
     createThreadErr = ct.error ?? null;
     if (createThreadErr) {
@@ -177,7 +191,7 @@ export async function POST(req: Request) {
               const j = await rr.json();
               aiText = j?.choices?.[0]?.message?.content?.trim() || "";
               if (aiText) {
-                await supabaseAdmin.from("messages").insert([{ event_id, role: "assistant", content: aiText }]);
+                await supabaseAdmin.from("messages").insert([{ event_id, role: "assistant", content: aiText, text: aiText }]);
               }
             }
             return NextResponse.json({ message: retryData, reply: aiText, event_id }, { status: 201 });
@@ -294,7 +308,7 @@ export async function POST(req: Request) {
     if (aiText) {
       const { error: insErr } = await supabaseAdmin
         .from("messages")
-        .insert([{ event_id, role: "assistant", content: aiText }]);
+        .insert([{ event_id, role: "assistant", content: aiText, text: aiText }]);
       if (insErr) console.warn("AI insert error:", insErr.message);
     }
 
