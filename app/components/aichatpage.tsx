@@ -108,8 +108,8 @@ export default function AIChatPage({
 
   const listRef = useAutoScroll(messages);
 
-  async function insertUserMessage(text: string) {
-    const eid = eventId ?? `ui-${Date.now()}`;
+  async function insertUserMessage(text: string, preferredEid?: string): Promise<string> {
+    const eid = preferredEid || eventId || `ui-${Date.now()}`;
     // Send message to server API which will insert using supabaseAdmin
     const res = await fetch("/api/chat", {
       method: "POST",
@@ -120,7 +120,6 @@ export default function AIChatPage({
     const j = await res.json().catch(() => ({}));
     if (!res.ok) {
       console.error("/api/chat insert error:", j?.error || res.statusText, j?.debug);
-      // Surface server-provided debug info in the UI so you can paste it here.
       const dbg = j?.debug ? `\n\nDebug: ${JSON.stringify(j.debug)}` : "";
       alert(`Send failed: ${j?.error || res.statusText}${dbg}`);
       throw new Error(j?.error || res.statusText || "Chat insert failed");
@@ -130,10 +129,8 @@ export default function AIChatPage({
     if (returnedEventId) {
       setEventId(returnedEventId);
     } else if (!eventId) {
-      // No server id returned (edge-case); fall back to temporary id so UI can show the message.
       setEventId(eid);
     }
-    // If the server provided debug info, log it for easier triage during testing
     if (j?.debug) console.debug("/api/chat debug:", j.debug);
 
     // Also append assistant reply immediately if provided; a realtime insert
@@ -144,25 +141,29 @@ export default function AIChatPage({
         { id: `tmp-${Date.now()}`, event_id: returnedEventId || eid, role: "assistant", content: j.reply, created_at: new Date().toISOString() },
       ]);
     }
+
+    return returnedEventId || eid;
   }
+
+  // Remove explicit AI trigger; server /api/chat replies already.
+  // async function triggerAI() { /* removed */ }
 
   async function send(text?: string) {
     const clean = (text ?? input ?? "").trim();
     if (!clean) return;
     try {
       setSending(true);
-      // Optimistic user bubble
-      const optimisticId = `tmp-user-${Date.now()}`;
+      // Optimistic user bubble using a stable temporary event id
+      const tempEid = eventId || `ui-${Date.now()}`;
       setMessages((m) => [
         ...m,
-        { id: optimisticId, event_id: eventId || "", role: "user", content: clean, created_at: new Date().toISOString() },
+        { id: `tmp-user-${Date.now()}`, event_id: tempEid, role: "user", content: clean, created_at: new Date().toISOString() },
       ]);
-      await insertUserMessage(clean);
+      const canonicalEid = await insertUserMessage(clean, tempEid);
       setInput("");
-      // After send, fetch full thread via admin-backed GET endpoint to ensure UI shows the persisted rows
-      const eid = (eventId as string) || "";
-      if (eid) {
-        const r = await fetch(`/api/chat?event_id=${encodeURIComponent(eid)}&limit=100`);
+      // After send, sync thread from server using the canonical event id
+      if (canonicalEid) {
+        const r = await fetch(`/api/chat?event_id=${encodeURIComponent(canonicalEid)}&limit=100`);
         if (r.ok) {
           const j = await r.json();
           if (Array.isArray(j?.messages)) {
@@ -173,6 +174,7 @@ export default function AIChatPage({
     } catch (e: any) {
       console.error("send failed:", e?.message || e);
       const msg = e?.message || (typeof e === "string" ? e : "Unknown error");
+      // show detailed error in-page so the user can copy/paste it easily
       setLastError(`Send failed: ${msg}`);
     } finally {
       setSending(false);
