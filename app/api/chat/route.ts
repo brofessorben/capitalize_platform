@@ -73,6 +73,33 @@ export async function POST(req: Request) {
   const sender = body?.sender ?? role;
   const eventRole = typeof sender === "string" && sender ? sender : (typeof role === "string" ? role : "guide");
 
+  // Discover allowed message roles from the CHECK constraint, so we always satisfy it
+  async function getAllowedRoles(): Promise<string[]> {
+    try {
+      const { data: tcs } = await supabaseAdmin
+        .from('information_schema.table_constraints')
+        .select('constraint_name')
+        .eq('table_name', 'messages')
+        .eq('constraint_type', 'CHECK');
+      const checkNames = (tcs || []).map((t: any) => t.constraint_name);
+      if (!checkNames?.length) return [];
+      const { data: ccs } = await supabaseAdmin
+        .from('information_schema.check_constraints')
+        .select('constraint_name, check_clause')
+        .in('constraint_name', checkNames);
+      const clause = (ccs || []).find((c: any) => /role/i.test(c?.check_clause || ''))?.check_clause || '';
+      const matches = clause.match(/'([^']+)'/g) || [];
+      return Array.from(new Set(matches.map((s) => s.replace(/'/g, ''))));
+    } catch {
+      return [];
+    }
+  }
+
+  const allowedRoles = await getAllowedRoles();
+  const allowedSet = new Set(allowedRoles);
+  const desiredUserRole = allowedSet.has('user') ? 'user' : (allowedSet.has(String(eventRole)) ? String(eventRole) : (allowedRoles[0] || 'user'));
+  const desiredAssistantRole = allowedSet.has('assistant') ? 'assistant' : (allowedSet.has('ai') ? 'ai' : (allowedRoles[0] || 'assistant'));
+
   if (!text) {
     return NextResponse.json({ error: "Missing 'text' in request body" }, { status: 400 });
   }
@@ -97,7 +124,7 @@ export async function POST(req: Request) {
     lead_id: isUuid(lead_id) ? lead_id : null,
     content: text,
     text, // back-compat for existing code reading messages.text
-    role,
+    role: desiredUserRole,
     sender,
   };
 
@@ -162,8 +189,7 @@ export async function POST(req: Request) {
     const isRoleCheck = (error as any)?.code === '23514' && /messages_role_check/i.test((error as any)?.message || '');
     if (isRoleCheck) {
       try {
-        const ALT_ALLOWED = ["referrer", "vendor", "host", "ai"];
-        const altRole = ALT_ALLOWED.includes(eventRole) ? eventRole : (role === "assistant" ? "ai" : "referrer");
+        const altRole = allowedSet.has(String(eventRole)) ? String(eventRole) : (allowedRoles[0] || desiredUserRole);
         const altPayload = { ...payload, role: altRole };
         const r = await supabaseAdmin.from("messages").insert([altPayload] as any).select().single();
         retried = true;
@@ -171,10 +197,9 @@ export async function POST(req: Request) {
         retryError = r.error;
         if (!r.error) {
           // Success on retry; proceed to AI reply using the same flow
-          // Generate assistant reply server-side (best-effort)
           try {
             if (!OPENAI_API_KEY) {
-              return NextResponse.json({ message: retryData, event_id }, { status: 201 });
+              return NextResponse.json({ message: retryData, event_id, allowedRoles }, { status: 201 });
             }
             const { data: msgs } = await supabaseAdmin
               .from("messages")
@@ -191,12 +216,12 @@ export async function POST(req: Request) {
               const j = await rr.json();
               aiText = j?.choices?.[0]?.message?.content?.trim() || "";
               if (aiText) {
-                await supabaseAdmin.from("messages").insert([{ event_id, role: "assistant", content: aiText, text: aiText }]);
+                await supabaseAdmin.from("messages").insert([{ event_id, role: desiredAssistantRole, content: aiText, text: aiText }]);
               }
             }
-            return NextResponse.json({ message: retryData, reply: aiText, event_id }, { status: 201 });
+            return NextResponse.json({ message: retryData, reply: aiText, event_id, allowedRoles }, { status: 201 });
           } catch (e: any) {
-            return NextResponse.json({ message: retryData, event_id }, { status: 201 });
+            return NextResponse.json({ message: retryData, event_id, allowedRoles }, { status: 201 });
           }
         }
       } catch {}
@@ -227,18 +252,18 @@ export async function POST(req: Request) {
           return { constraint_name: k.constraint_name, local_column: k.column_name, referenced_table: ref?.table_name ?? null, referenced_column: ref?.column_name ?? null };
         });
       }
-      const { data: tcs } = await supabaseAdmin
+      const { data: tcs2 } = await supabaseAdmin
         .from('information_schema.table_constraints')
-        .select('constraint_name, constraint_type')
+        .select('constraint_name')
         .eq('table_name', 'messages')
         .eq('constraint_type', 'CHECK');
-      const checkNames = (tcs || []).map((t: any) => t.constraint_name);
-      if (checkNames.length) {
-        const { data: ccs } = await supabaseAdmin
+      const checkNames2 = (tcs2 || []).map((t: any) => t.constraint_name);
+      if (checkNames2.length) {
+        const { data: ccs2 } = await supabaseAdmin
           .from('information_schema.check_constraints')
           .select('constraint_name, check_clause')
-          .in('constraint_name', checkNames);
-        checkInfo = ccs || [];
+          .in('constraint_name', checkNames2);
+        checkInfo = ccs2 || [];
       }
     } catch {}
 
@@ -249,6 +274,7 @@ export async function POST(req: Request) {
         debug: {
           payload,
           event_id,
+          allowedRoles,
           insertErr: { message: error.message, details: (error as any)?.details ?? null, code: (error as any)?.code ?? null },
           retried,
           retryErr: retryError ? { message: retryError.message, code: retryError.code } : null,
@@ -263,7 +289,7 @@ export async function POST(req: Request) {
   // Generate assistant reply server-side
   try {
     if (!OPENAI_API_KEY) {
-      return NextResponse.json({ message: data, event_id }, { status: 201 });
+      return NextResponse.json({ message: data, event_id, allowedRoles }, { status: 201 });
     }
 
     const { data: msgs } = await supabaseAdmin
@@ -299,7 +325,7 @@ export async function POST(req: Request) {
     if (!r.ok) {
       const t = await r.text();
       console.warn("OpenAI returned error:", t);
-      return NextResponse.json({ message: data, event_id }, { status: 201 });
+      return NextResponse.json({ message: data, event_id, allowedRoles }, { status: 201 });
     }
 
     const j = await r.json();
@@ -308,13 +334,13 @@ export async function POST(req: Request) {
     if (aiText) {
       const { error: insErr } = await supabaseAdmin
         .from("messages")
-        .insert([{ event_id, role: "assistant", content: aiText, text: aiText }]);
+        .insert([{ event_id, role: desiredAssistantRole, content: aiText, text: aiText }]);
       if (insErr) console.warn("AI insert error:", insErr.message);
     }
 
-    return NextResponse.json({ message: data, reply: aiText, event_id }, { status: 201 });
+    return NextResponse.json({ message: data, reply: aiText, event_id, allowedRoles }, { status: 201 });
   } catch (e: any) {
     console.error("AI generation failed:", e?.message || e);
-    return NextResponse.json({ message: data, event_id }, { status: 201 });
+    return NextResponse.json({ message: data, event_id, allowedRoles }, { status: 201 });
   }
 }
