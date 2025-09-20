@@ -66,7 +66,8 @@ export async function POST(req: Request) {
   } catch {}
 
   const text = typeof body?.text === "string" ? body.text.trim() : "";
-  const lead_id = body?.lead_id ?? null;
+  const bodyEventId = body?.event_id ?? null;
+  const lead_id = body?.lead_id ?? null; // legacy client may send thread id here
   const rawRole = typeof body?.role === "string" ? body.role : null;
   const ALLOWED_MSG_ROLES = ["user", "assistant", "system"];
   const role = ALLOWED_MSG_ROLES.includes(rawRole || "") ? (rawRole as string) : "user";
@@ -111,7 +112,9 @@ export async function POST(req: Request) {
   }
 
   const isUuid = (s: any) => typeof s === "string" && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/.test(s);
-  const event_id = isUuid(lead_id) ? lead_id : (typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : randomUUID());
+  const event_id = isUuid(bodyEventId)
+    ? bodyEventId
+    : (isUuid(lead_id) ? lead_id : (typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : randomUUID()));
 
   // Prefer authenticated user id from session if present
   let sessionUserId: string | null = null;
@@ -127,9 +130,10 @@ export async function POST(req: Request) {
   const payload: any = {
     user_id: rowUserId,
     event_id,
-    lead_id: isUuid(lead_id) ? lead_id : null,
+    // Do not set lead_id from client thread id; avoid FK to leads
+    lead_id: null,
     content: text,
-    text: text, // back-compat for existing code reading messages.text
+    text, // back-compat for existing code reading messages.text
     role: desiredUserRole,
     sender,
   };

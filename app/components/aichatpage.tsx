@@ -115,7 +115,7 @@ export default function AIChatPage({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // Do not send a non-UUID user_id; leave it null so server handles auth/user mapping.
-      body: JSON.stringify({ user_id: null, lead_id: eid, role: "user", sender: role, text }),
+      body: JSON.stringify({ user_id: null, event_id: eid, lead_id: eid, role: "user", sender: role, text }),
     });
     const j = await res.json().catch(() => ({}));
     if (!res.ok) {

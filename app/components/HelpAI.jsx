@@ -179,7 +179,8 @@ export default function HelpAI({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: null,
-          lead_id: eid,
+          event_id: eid,
+          lead_id: eid, // legacy fallback
           role: "user",
           sender: role || "guide",
           text,
