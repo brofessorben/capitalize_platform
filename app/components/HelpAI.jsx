@@ -167,33 +167,24 @@ export default function HelpAI({
       return;
     }
 
-    // Optimistic user bubble
     setMessages((m) => [...m, { role: "user", content: text }]);
     setInput("");
     setSending(true);
 
     try {
-      const eid = eventId ?? `ui-${userId}-${Date.now()}`;
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id: null,
-          event_id: eid,
-          lead_id: eid, // legacy fallback
-          role: "user",
-          sender: role || "guide",
-          text,
-        }),
+        body: JSON.stringify({ message: text }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Chat error");
-      if (data?.event_id) setEventId(data.event_id);
-      setMessages((m) => [...m, { role: "assistant", content: data.reply || "(no reply)" }]);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || res.statusText || "Chat error");
+      setMessages((m) => [...m, { role: "assistant", content: data?.reply || "(no reply)" }]);
     } catch (err) {
+      console.error("/api/chat error:", err);
       setMessages((m) => [
         ...m,
-        { role: "assistant", content: `Sorry—something went wrong: ${String(err?.message || err)}` },
+        { role: "assistant", content: `Sorry—API error: ${String(err?.message || err)}` },
       ]);
     } finally {
       setSending(false);
