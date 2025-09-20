@@ -309,8 +309,9 @@ export async function POST(req: Request) {
       .order("created_at", { ascending: true })
       .limit(20);
 
+    // Map DB roles to OpenAI roles: our assistant rows use role='ai'
     const history = (msgs || []).map((m: any) => ({
-      role: m.role === "assistant" ? "assistant" : "user",
+      role: m.role === "ai" ? "assistant" : "user",
       content: m.content || "",
     }));
 
@@ -323,7 +324,7 @@ export async function POST(req: Request) {
       max_tokens: 500,
     };
 
-    const r = await fetch("https://api.openai.com/v1/chat/completions", {
+    let r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -335,7 +336,19 @@ export async function POST(req: Request) {
     if (!r.ok) {
       const t = await r.text();
       console.warn("OpenAI returned error:", t);
-      return NextResponse.json({ message: data, event_id, allowedRoles }, { status: 201 });
+      // Fallback once to a widely available model
+      try {
+        const fallback = { ...payloadOpenAI, model: "gpt-4o-mini" };
+        r = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${OPENAI_API_KEY}` },
+          body: JSON.stringify(fallback),
+        });
+      } catch {}
+      if (!r.ok) {
+        const t2 = await r.text().catch(() => "");
+        return NextResponse.json({ message: data, event_id, allowedRoles, aiError: t || t2 }, { status: 201 });
+      }
     }
 
     const j = await r.json();
