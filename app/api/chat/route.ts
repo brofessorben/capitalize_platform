@@ -73,6 +73,11 @@ export async function POST(req: Request) {
   const sender = body?.sender ?? role;
   const eventRole = typeof sender === "string" && sender ? sender : (typeof role === "string" ? role : "guide");
 
+  // Enforce role domain: messages.role must be an actor: referrer | vendor | host | ai
+  const ACTOR_ROLES = ["referrer", "vendor", "host", "ai"] as const;
+  const userMsgRole = ACTOR_ROLES.includes(String(eventRole) as any) ? String(eventRole) : "ai";
+  const assistantMsgRole = "ai";
+
   // Discover allowed message roles from the CHECK constraint, so we always satisfy it
   async function getAllowedRoles(): Promise<string[]> {
     try {
@@ -97,8 +102,9 @@ export async function POST(req: Request) {
 
   const allowedRoles = await getAllowedRoles();
   const allowedSet = new Set(allowedRoles);
-  const desiredUserRole = allowedSet.has('user') ? 'user' : (allowedSet.has(String(eventRole)) ? String(eventRole) : (allowedRoles[0] || 'user'));
-  const desiredAssistantRole = allowedSet.has('assistant') ? 'assistant' : (allowedSet.has('ai') ? 'ai' : (allowedRoles[0] || 'assistant'));
+  // Final roles we will use for inserts
+  const desiredUserRole = userMsgRole;
+  const desiredAssistantRole = assistantMsgRole;
 
   if (!text) {
     return NextResponse.json({ error: "Missing 'text' in request body" }, { status: 400 });
@@ -123,7 +129,7 @@ export async function POST(req: Request) {
     event_id,
     lead_id: isUuid(lead_id) ? lead_id : null,
     content: text,
-    text, // back-compat for existing code reading messages.text
+    text: text, // back-compat for existing code reading messages.text
     role: desiredUserRole,
     sender,
   };
@@ -189,7 +195,7 @@ export async function POST(req: Request) {
     const isRoleCheck = (error as any)?.code === '23514' && /messages_role_check/i.test((error as any)?.message || '');
     if (isRoleCheck) {
       try {
-        const altRole = allowedSet.has(String(eventRole)) ? String(eventRole) : (allowedRoles[0] || desiredUserRole);
+        const altRole = userMsgRole;
         const altPayload = { ...payload, role: altRole };
         const r = await supabaseAdmin.from("messages").insert([altPayload] as any).select().single();
         retried = true;
@@ -216,7 +222,7 @@ export async function POST(req: Request) {
               const j = await rr.json();
               aiText = j?.choices?.[0]?.message?.content?.trim() || "";
               if (aiText) {
-                await supabaseAdmin.from("messages").insert([{ event_id, role: desiredAssistantRole, content: aiText, text: aiText }]);
+                await supabaseAdmin.from("messages").insert([{ event_id, role: assistantMsgRole, content: aiText, text: aiText }]);
               }
             }
             return NextResponse.json({ message: retryData, reply: aiText, event_id, allowedRoles }, { status: 201 });
@@ -334,7 +340,7 @@ export async function POST(req: Request) {
     if (aiText) {
       const { error: insErr } = await supabaseAdmin
         .from("messages")
-        .insert([{ event_id, role: desiredAssistantRole, content: aiText, text: aiText }]);
+        .insert([{ event_id, role: assistantMsgRole, content: aiText, text: aiText }]);
       if (insErr) console.warn("AI insert error:", insErr.message);
     }
 
