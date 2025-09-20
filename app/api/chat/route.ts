@@ -226,7 +226,8 @@ export async function POST(req: Request) {
               const j = await rr.json();
               aiText = j?.choices?.[0]?.message?.content?.trim() || "";
               if (aiText) {
-                await supabaseAdmin.from("messages").insert([{ event_id, role: assistantMsgRole, content: aiText, text: aiText }]);
+                const { error: insErr2 } = await supabaseAdmin.from("messages").insert([{ event_id, role: assistantMsgRole, content: aiText, text: aiText }]);
+                if (insErr2) aiText = ""; // do not send reply unless persisted
               }
             }
             return NextResponse.json({ message: retryData, reply: aiText, event_id, allowedRoles }, { status: 201 });
@@ -354,14 +355,16 @@ export async function POST(req: Request) {
     const j = await r.json();
     const aiText = j?.choices?.[0]?.message?.content?.trim() || "";
 
+    let replyOut = "";
+    let aiInsertErr: any = null;
     if (aiText) {
       const { error: insErr } = await supabaseAdmin
         .from("messages")
         .insert([{ event_id, role: assistantMsgRole, content: aiText, text: aiText }]);
-      if (insErr) console.warn("AI insert error:", insErr.message);
+      if (!insErr) replyOut = aiText; else aiInsertErr = { message: insErr.message, code: (insErr as any)?.code };
     }
 
-    return NextResponse.json({ message: data, reply: aiText, event_id, allowedRoles }, { status: 201 });
+    return NextResponse.json({ message: data, reply: replyOut, event_id, allowedRoles, aiInsertErr }, { status: 201 });
   } catch (e: any) {
     console.error("AI generation failed:", e?.message || e);
     return NextResponse.json({ message: data, event_id, allowedRoles }, { status: 201 });
