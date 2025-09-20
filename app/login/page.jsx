@@ -43,16 +43,16 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-[80vh] flex items-center justify-center bg-[#0b0b0b] text-white p-6">
-      <div className="w-full max-w-md rounded-2xl border border-[#1f3b2d] bg-[#0f1a14] p-6">
+    <div className="min-h-[80vh] flex items-center justify-center text-white p-6">
+      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 backdrop-blur p-6">
         <h1 className="text-2xl font-semibold mb-3">Sign in</h1>
-        <p className="text-sm text-[#9adbb0] mb-6">
+        <p className="text-sm text-white/70 mb-6">
           Use Google to get into your CAPITALIZE dashboard.
         </p>
         <button
           onClick={signInGoogle}
           disabled={busy}
-          className="w-full rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 px-4 py-3 font-semibold"
+          className="w-full rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60 px-4 py-3 font-semibold text-black"
         >
           {busy ? "…" : "Continue with Google"}
         </button>

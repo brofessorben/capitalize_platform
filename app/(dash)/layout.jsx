@@ -3,8 +3,8 @@ import Link from "next/link";
 
 export default function DashLayout({ children }) {
   return (
-    <div className="min-h-dvh bg-black text-gray-100">
-      <header className="border-b border-neutral-800">
+    <div className="min-h-dvh text-white">
+      <header className="border-b border-neutral-800/60 bg-transparent">
         <div className="mx-auto max-w-7xl px-6 h-16 flex items-center justify-between">
           <Link href="/" className="font-black tracking-tight text-xl">CAPITALIZE</Link>
           <nav className="flex gap-4 text-sm">

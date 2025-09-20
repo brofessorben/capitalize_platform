@@ -103,9 +103,10 @@ export async function POST(req: Request) {
 
   const allowedRoles = await getAllowedRoles();
   const allowedSet = new Set(allowedRoles);
-  // Final roles we will use for inserts
-  const desiredUserRole = userMsgRole;
-  const desiredAssistantRole = assistantMsgRole;
+  // Final roles we will use for inserts based on DB CHECK constraint
+  const pick = (...cands: string[]) => cands.find((c) => allowedSet.has(c));
+  const desiredUserRole = pick(String(eventRole), 'user') || allowedRoles[0] || 'user';
+  const desiredAssistantRole = pick('ai', 'assistant') || allowedRoles[0] || 'assistant';
 
   if (!text) {
     return NextResponse.json({ error: "Missing 'text' in request body" }, { status: 400 });
@@ -133,7 +134,7 @@ export async function POST(req: Request) {
     // Do not set lead_id from client thread id; avoid FK to leads
     lead_id: null,
     content: text,
-    text, // back-compat for existing code reading messages.text
+    text: // back-compat for existing code reading messages.text
     role: desiredUserRole,
     sender,
   };
@@ -199,7 +200,7 @@ export async function POST(req: Request) {
     const isRoleCheck = (error as any)?.code === '23514' && /messages_role_check/i.test((error as any)?.message || '');
     if (isRoleCheck) {
       try {
-        const altRole = userMsgRole;
+        const altRole = desiredUserRole;
         const altPayload = { ...payload, role: altRole };
         const r = await supabaseAdmin.from("messages").insert([altPayload] as any).select().single();
         retried = true;
@@ -226,7 +227,7 @@ export async function POST(req: Request) {
               const j = await rr.json();
               aiText = j?.choices?.[0]?.message?.content?.trim() || "";
               if (aiText) {
-                const { error: insErr2 } = await supabaseAdmin.from("messages").insert([{ event_id, role: assistantMsgRole, content: aiText, text: aiText }]);
+                const { error: insErr2 } = await supabaseAdmin.from("messages").insert([{ event_id, role: desiredAssistantRole, content: aiText, text: aiText }]);
                 if (insErr2) aiText = ""; // do not send reply unless persisted
               }
             }
@@ -360,7 +361,7 @@ export async function POST(req: Request) {
     if (aiText) {
       const { error: insErr } = await supabaseAdmin
         .from("messages")
-        .insert([{ event_id, role: assistantMsgRole, content: aiText, text: aiText }]);
+        .insert([{ event_id, role: desiredAssistantRole, content: aiText, text: aiText }]);
       if (!insErr) replyOut = aiText; else aiInsertErr = { message: insErr.message, code: (insErr as any)?.code };
     }
 
